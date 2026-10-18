@@ -1,0 +1,18 @@
+# Daftar putih yang ketat: semua diabaikan kecuali yang disebut di bawah.
+#
+# Folder ini menyimpan transkrip percakapan, konfigurasi MCP, dan virtualenv yang
+# tidak boleh terbit. Pola "abaikan semua lalu izinkan satu per satu" dipakai supaya
+# berkas baru tidak pernah ikut ter-commit tanpa sengaja. Jangan ganti dengan daftar
+# pengecualian biasa.
+/*
+!/.gitignore
+!/README.md
+!/tools/
+/tools/*
+!/tools/rag_engine.py
+!/tools/rag_eval.py
+!/tools/vault_lint.py
+!/tools/sync_rules.py
+!/tools/session_context.py
+!/tools/pdf_parser.py
+!/tools/export_transcript.py
