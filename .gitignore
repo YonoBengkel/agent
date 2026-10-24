@@ -16,3 +16,6 @@
 !/tools/session_context.py
 !/tools/pdf_parser.py
 !/tools/export_transcript.py
+!/tools/vault_guard.py
+!/tools/test_tools.py
+!/tools/requirements/

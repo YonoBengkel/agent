@@ -1,0 +1,2 @@
+# opendataloader-venv, Python 3.14.5. Pasang ulang: python -m venv tools/opendataloader-venv && tools/opendataloader-venv/Scripts/python.exe -m pip install -r tools/requirements/opendataloader-venv.txt
+opendataloader-pdf==2.5.2

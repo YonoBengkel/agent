@@ -3,8 +3,10 @@ import re
 import sys
 import json
 import time
+import random
 import fnmatch
 import argparse
+import itertools
 import statistics
 from collections import Counter, defaultdict
 
@@ -19,7 +21,7 @@ def load_set(path):
         return [json.loads(line) for line in f if line.strip()]
 
 def load_chunks(vault, chunk_size, exclude, overlap=0):
-    """Chunk vault memakai fungsi rag_engine yang sama dengan produksi."""
+    """Chunk vault memakai fungsi rag_engine yang sama dengan produksi: (file, jalur judul bagian, teks)."""
     chunks = []
     for f in rag_engine.get_files(vault):
         rel = os.path.relpath(f, vault).replace("\\", "/")
@@ -31,7 +33,7 @@ def load_chunks(vault, chunk_size, exclude, overlap=0):
         except (OSError, UnicodeDecodeError) as e:
             print(f"[WARN] Gagal membaca {f}: {e}")
             continue
-        chunks += [(rel, c) for c in rag_engine.chunk_text(text, chunk_size, overlap) if c.strip()]
+        chunks += [(rel, rag_engine.section_label(rel, t), c) for t, c in rag_engine.chunk_sections(text, chunk_size, overlap) if c.strip()]
     return chunks
 
 class Vector:
@@ -84,11 +86,40 @@ def report(label, per, k, distance):
                   f"tanpa jawaban: median {statistics.median(n):.3f} (min {min(n):.3f}, maks {max(n):.3f})")
     return m
 
+def paired_test(a, b, rounds=100000, seed=0):
+    """Uji randomisasi berpasangan dua sisi (sign-flip): peluang selisih rata-rata minimal sebesar ini muncul
+    kalau label A dan B tiap soal ditukar acak. Eksak untuk <= 16 selisih bukan nol, selain itu Monte Carlo ber-seed."""
+    d = [x - y for x, y in zip(a, b) if abs(x - y) > 1e-12]  # selisih nol tidak berubah oleh tukar tanda
+    if not d:
+        return 1.0
+    obs = abs(sum(d)) - 1e-9
+    if len(d) <= 16:
+        return sum(abs(sum(s * x for s, x in zip(signs, d))) >= obs for signs in itertools.product((1, -1), repeat=len(d))) / 2 ** len(d)
+    rng = random.Random(seed)
+    hits = sum(abs(sum(x if rng.random() < 0.5 else -x for x in d)) >= obs for _ in range(rounds))
+    return (hits + 1) / (rounds + 1)
+
+def compare(path_a, path_b):
+    """Bandingkan dua file hasil per soal (pasangan menurut ID) untuk setiap set::backend yang ada di keduanya."""
+    A, B = (json.load(open(p, encoding="utf-8"))["results"] for p in (path_a, path_b))
+    print(f"# Perbandingan berpasangan\n\nA = `{os.path.basename(path_a)}`\nB = `{os.path.basename(path_b)}`\n\n"
+          "| Set::backend | Metrik | n | A | B | B menang / kalah / seri | p (dua sisi) |\n|---|---|---|---|---|---|---|")
+    for key in sorted(A.keys() & B.keys()):
+        pa, pb = ({p["id"]: p for p in R[key]["per"] if p["type"] == "answerable"} for R in (A, B))
+        ids = sorted(pa.keys() & pb.keys())
+        for metric, label in (("recall", "Recall"), ("rr", "MRR")):
+            x, y = [pa[i][metric] for i in ids], [pb[i][metric] for i in ids]
+            win, loss = sum(v > u for u, v in zip(x, y)), sum(v < u for u, v in zip(x, y))
+            print(f"| {key} | {label} | {len(ids)} | {statistics.mean(x):.2f} | {statistics.mean(y):.2f} | "
+                  f"{win} / {loss} / {len(ids) - win - loss} | {paired_test(y, x):.3f} |")
+
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
     p = argparse.ArgumentParser(description="Evaluasi retrieval RAG (Recall@K, Precision@K, MRR) di tingkat dokumen: chunk diagregasi per file.")
-    p.add_argument("vault")
-    p.add_argument("--set", action="append", required=True, help="File JSONL test set (boleh diulang)")
+    p.add_argument("vault", nargs="?")
+    p.add_argument("--set", action="append", help="File JSONL test set (boleh diulang)")
+    p.add_argument("--compare", nargs=2, metavar=("A.json", "B.json"),
+                   help="Jangan evaluasi; bandingkan dua file hasil dengan uji randomisasi berpasangan")
     p.add_argument("--k", type=int, default=5)
     p.add_argument("--model", default="all-MiniLM-L6-v2")
     p.add_argument("--query-prefix", default="", help='mis. "query: " untuk keluarga e5')
@@ -102,18 +133,26 @@ def main():
     p.add_argument("--link-seeds", type=int, default=5, help="Jumlah hasil teratas yang tetangganya diambil")
     p.add_argument("--no-link-norm", action="store_true", help="Jangan bagi skor tetangga dengan derajat halaman")
     p.add_argument("--log-weight", type=float, action="append", default=[], help="Tambah backend hybrid+log dengan pengali skor halaman Log/ ini (boleh diulang)")
+    p.add_argument("--section", choices=["none", "vector", "bm25", "both"], default="none",
+                   help="Backend yang teks chunk-nya diawali jalur judul bagian (SECTION_CONTEXT di rag_engine.py)")
     p.add_argument("--out", default=os.path.join(HERE, "eval", "results"))
     a = p.parse_args()
+    if a.compare:
+        return compare(*a.compare)
+    if not a.vault or not a.set:
+        p.error("vault dan --set wajib, kecuali dengan --compare")
     if not 0 <= a.overlap < a.chunk_size:
         p.error("--overlap harus >= 0 dan lebih kecil dari --chunk-size")
 
     t0 = time.time()
-    chunks = load_chunks(a.vault, a.chunk_size, a.exclude, a.overlap)
+    sectioned = load_chunks(a.vault, a.chunk_size, a.exclude, a.overlap)
+    chunks = [(f, c) for f, _, c in sectioned]
     backends = {}
     if a.backend in ("bm25", "hybrid", "all"):
-        bm = BM25(chunks); backends["bm25"] = (bm.rank, False)
+        bm = BM25([(f, rag_engine.contextual(s, c, "bm25", a.section)) for f, s, c in sectioned]); backends["bm25"] = (bm.rank, False)
     if a.backend in ("vector", "hybrid", "all"):
-        vec = Vector(chunks, a.model, a.passage_prefix, a.query_prefix); backends["vector"] = (vec.rank, True)
+        vec = Vector([(f, rag_engine.contextual(s, c, "vector", a.section)) for f, s, c in sectioned],
+                     a.model, a.passage_prefix, a.query_prefix); backends["vector"] = (vec.rank, True)
     if a.backend in ("hybrid", "all"):
         backends["hybrid"] = (lambda q: rrf([vec.rank(q), bm.rank(q)], [a.vector_weight, 1]), False)
         graph = link_graph(chunks)
@@ -130,7 +169,7 @@ def main():
 
     excl = f", tanpa {', '.join(a.exclude)}" if a.exclude else ""
     link = f", link seeds {a.link_seeds}{' tanpa normalisasi' if a.no_link_norm else ''}" if a.link_weight else ""
-    print(f"# Evaluasi RAG — model `{a.model}`, chunk {a.chunk_size}, overlap {a.overlap}{excl}{link}\n\n"
+    print(f"# Evaluasi RAG — model `{a.model}`, chunk {a.chunk_size}, overlap {a.overlap}, judul bagian: {a.section}{excl}{link}\n\n"
           f"{len({f for f, _ in chunks})} file, {len(chunks)} chunk, siap dalam {time.time() - t0:.1f} detik. "
           f"Tingkat dokumen; Recall = file relevan di Top-{a.k} ÷ total file relevan; Precision = ÷ {a.k}; RR = 1 ÷ peringkat file relevan pertama.")
     results = {}
@@ -141,7 +180,7 @@ def main():
             per = evaluate(fn, rows, a.k)
             results[f"{os.path.basename(s)}::{name}"] = {"metrics": report(name, per, a.k, is_dist), "per": per}
     os.makedirs(a.out, exist_ok=True)
-    tag = re.sub(r"[^A-Za-z0-9]+", "-", f"{a.model}-c{a.chunk_size}-o{a.overlap}-{'-'.join(a.exclude) or 'all'}")
+    tag = re.sub(r"[^A-Za-z0-9]+", "-", f"{a.model}-c{a.chunk_size}-o{a.overlap}-s{a.section}-{'-'.join(a.exclude) or 'all'}")
     out = os.path.join(a.out, f"{time.strftime('%Y%m%d-%H%M%S')}-{tag}.json")
     with open(out, "w", encoding="utf-8") as f:
         json.dump({"config": vars(a), "chunks": len(chunks), "results": results}, f, ensure_ascii=False, indent=1)
