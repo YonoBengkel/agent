@@ -150,6 +150,24 @@ def project_activity(vault, projects_root, pages, active_days=14, skip=("AI Agen
             stale.append((name, day(changed), day(noted)))
     return stale, unpaged
 
+LOG_NUMBER = re.compile(r"^(\d{3}) ")
+
+def log_numbering(paths, log_dir):
+    """Aturan 4: log sesi bernama `NNN Judul.md`, nomor urut dibuat per folder. Kembalikan (tanpa nomor, nomor ganda)."""
+    root, missing, seen, dup = os.path.abspath(log_dir) + os.sep, [], set(), []
+    for p in paths:
+        ap = os.path.abspath(p)
+        if not ap.startswith(root):
+            continue
+        m = LOG_NUMBER.match(os.path.basename(ap))
+        if not m:
+            missing.append(p)
+        elif (os.path.dirname(ap), m.group(1)) in seen:
+            dup.append(p)
+        else:
+            seen.add((os.path.dirname(ap), m.group(1)))
+    return missing, dup
+
 def md_files(vault):
     for dp, dn, fn in os.walk(vault):
         dn[:] = [d for d in dn if not d.startswith(".")]
@@ -254,6 +272,9 @@ def main():
     section("File kosong (0 byte / hanya spasi)", [rel(p) for p in empty])
     section("File dengan BOM UTF-8", [rel(p) for p in bom])
     section("File dengan karakter kontrol (escape backslash yang rusak)", [rel(p) for p in control])
+    unnumbered, dup_numbers = log_numbering(sorted(files), os.path.join(args.vault, "Log"))
+    section("Log tanpa nomor urut di depan nama (Aturan 4)", [rel(p) for p in unnumbered])
+    section("Log dengan nomor ganda dalam satu folder", [rel(p) for p in dup_numbers])
     section("Halaman wiki yatim (tidak ada link masuk dari file lain)", [rel(p) for p in orphans])
     section("Halaman wiki yang tidak tercantum di index.md", [rel(p) for p in not_indexed])
     section("Rujukan path yang tidak ada lagi (halaman wiki dan hot.md)", [f"{rel(p)}: `{s}`" for p, s in dead_paths])
