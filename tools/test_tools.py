@@ -56,11 +56,36 @@ class ProjectActivity(unittest.TestCase):
             put(os.path.join(vault, "Log", "P", "a.md"), mtime=old)
             put(os.path.join(root, "P", "main.py"))                       # berubah hari ini, log 3 hari lalu
             put(os.path.join(root, "Q", "x.py"))                          # aktif tanpa halaman
+            put(os.path.join(root, "K", "tugas.ipynb"))                   # mata kuliah: sudah punya Log/Kuliah/K
+            put(os.path.join(vault, "Log", "Kuliah", "K", "diskusi.md"))
             put(os.path.join(root, "R", ".no-vault"))                     # keluar dari vault
             put(os.path.join(root, "P", "node_modules", "y.js"))          # dilewati
             stale, unpaged = vault_lint.project_activity(vault, root, {"P": (page, open(page, encoding="utf-8").read())})
             self.assertEqual([s[0] for s in stale], ["P"])
             self.assertEqual([u[0] for u in unpaged], ["Q"])
+
+class RuleBackup(unittest.TestCase):
+    def test_backup_and_check(self):
+        import tempfile, sync_rules
+        with tempfile.TemporaryDirectory() as d:
+            src, mirror, conf = (os.path.join(d, n) for n in ("AGENTS.md", "AGENTS_id.md", "Konfigurasi"))
+            os.makedirs(os.path.join(d, "Konfigurasi"))
+            for p, t in ((src, "aturan"), (mirror, "cermin"), (os.path.join(conf, "rule_sync.json"), "{}"), (os.path.join(conf, "rahasia.txt"), "x")):
+                open(p, "w", encoding="utf-8").write(t)
+            out = os.path.join(d, "Cadangan Aturan")
+            reg = {"syncs": [{"source": src}], "translations": [{"source": src, "mirror": mirror}],
+                   "backup": {"dir": out, "folders": [conf], "exclude": ["rahasia.txt"]}}
+            self.assertEqual(sync_rules.backup(reg, False), 0)
+            self.assertTrue(os.path.exists(sync_rules.backup_path(out, src)))
+            self.assertFalse(os.path.exists(sync_rules.backup_path(out, os.path.join(conf, "rahasia.txt"))))
+            self.assertTrue(os.path.exists(os.path.join(out, ".no-vault")))
+            self.assertEqual(sync_rules.backup(reg, True), 0)        # sudah sama
+            open(src, "w", encoding="utf-8").write("aturan baru")
+            self.assertEqual(sync_rules.backup(reg, True), 1)        # cadangan basi terdeteksi
+
+    def test_dot_folder_renamed(self):
+        import sync_rules
+        self.assertIn("dot-claude", sync_rules.backup_path("B", os.path.join("C:" + os.sep, "Users", "x", ".claude", "CLAUDE.md")))
 
 if __name__ == "__main__":
     unittest.main()

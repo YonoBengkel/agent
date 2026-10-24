@@ -36,6 +36,49 @@ def fingerprint(t):
         text = text[head.start():body_start + nxt.start()] if nxt else text[head.start():]
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
 
+def backup_path(base, src):
+    """D:/CODE/AGENTS.md -> <base>/D/CODE/AGENTS.md; folder bertitik diberi awalan 'dot-' supaya tidak disembunyikan Obsidian."""
+    drive, rest = os.path.splitdrive(os.path.abspath(src))
+    parts = [p if not p.startswith(".") else "dot-" + p[1:] for p in rest.replace("\\", "/").split("/") if p]
+    return os.path.join(base, drive.rstrip(":") or "root", *parts)
+
+def backup(reg, check):
+    """Cadangkan setiap sumber dan terjemahan di registry, plus folder tambahan, ke folder yang ikut tersinkron
+    (vault, lewat Obsidian Sync). Hanya berkas yang isinya berubah yang ditulis. Kembalikan jumlah masalah."""
+    b = reg.get("backup")
+    if not b:
+        return 0
+    files = {s["source"] for s in reg["syncs"]} | {t[k] for t in reg.get("translations", []) for k in ("source", "mirror")}
+    for folder in b.get("folders", []):
+        files |= {os.path.join(folder, f) for f in os.listdir(folder)
+                  if os.path.isfile(os.path.join(folder, f)) and f not in b.get("exclude", [])}
+    files = {os.path.abspath(f) for f in files}   # path dari registry dan dari isi folder bisa beda pemisah
+    print(f"# Cadangan aturan ke {b['dir']}")
+    problems = 0
+    for src in sorted(files):
+        dst = backup_path(b["dir"], src)
+        try:
+            data = open(src, "rb").read()
+        except OSError as e:
+            print(f"  [TIDAK TERJANGKAU] {src}: {e}")
+            problems += 1
+            continue
+        if os.path.exists(dst) and open(dst, "rb").read() == data:
+            continue
+        if check:
+            print(f"  [CADANGAN BASI] {src}")
+            problems += 1
+        else:
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            open(dst, "wb").write(data)
+            print(f"  [DICADANGKAN] {src}")
+    if not check:
+        for name, text in ((".no-vault", ""), ("README.md", b.get("readme", ""))):
+            p = os.path.join(b["dir"], name)
+            if not os.path.exists(p):
+                open(p, "w", encoding="utf-8").write(text)
+    return problems
+
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
     here = os.path.dirname(os.path.abspath(__file__))
@@ -109,6 +152,7 @@ def main():
         else:
             print(f"  [PERIKSA] {t['mirror']}{note}: bagian sumbernya berubah sejak terakhir diterjemahkan")
             problems += 1
+    problems += backup(reg, a.check)
     sys.exit(1 if problems else 0)
 
 if __name__ == "__main__":

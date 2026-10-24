@@ -137,8 +137,9 @@ def project_activity(vault, projects_root, pages, active_days=14, skip=("AI Agen
         changed = latest_mtime(folder)
         if changed is None:
             continue
-        if name not in pages:
-            if time.time() - changed < active_days * 86400:
+        if name not in pages:   # folder mata kuliah dicatat di Log/Kuliah/<nama> (D:\KULIAH\AGENTS.md), itu dihitung tercatat
+            logged = any(os.path.isdir(os.path.join(vault, l)) for l in (f"Log/{name}", f"Log/Kuliah/{name}"))
+            if not logged and time.time() - changed < active_days * 86400:
                 unpaged.append((name, day(changed)))
             continue
         path, page_text = pages[name]
@@ -290,7 +291,7 @@ def main():
         print("\nMetrik: tanggal file terbaru di folder proyek (tanpa .git, node_modules, venv, build) dibanding tanggal log "
               "terbaru di folder log yang disebut halaman proyek (atau `Log/<nama>`, `Log/Kuliah/<nama>`) dan tanggal halamannya.")
         section("Proyek yang berubah sesudah log atau halaman terakhirnya", [f"{n}: file {c}, catatan {l}" for n, c, l in stale])
-        section(f"Folder aktif ({args.active_days} hari) tanpa halaman proyek", [f"{n}: file {c}" for n, c in unpaged])
+        section(f"Folder aktif ({args.active_days} hari) tanpa halaman proyek maupun folder log", [f"{n}: file {c}" for n, c in unpaged])
     print("\n## Tidak dicek skrip ini\n- Kontradiksi dan klaim basi antar-catatan: perlu dibaca agent.")
 
 if __name__ == "__main__":
