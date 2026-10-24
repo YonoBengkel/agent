@@ -63,6 +63,8 @@ class ProjectActivity(unittest.TestCase):
             stale, unpaged = vault_lint.project_activity(vault, root, {"P": (page, open(page, encoding="utf-8").read())})
             self.assertEqual([s[0] for s in stale], ["P"])
             self.assertEqual([u[0] for u in unpaged], ["Q"])
+            _, unpaged = vault_lint.project_activity(vault, root, {"P": (page, "")}, mentioned={"Q"})   # Q dirujuk dari log
+            self.assertEqual(unpaged, [])
 
 class RuleBackup(unittest.TestCase):
     def test_backup_and_check(self):

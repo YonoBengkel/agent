@@ -126,7 +126,7 @@ def latest_mtime(folder, ext=None):
             best = m if best is None or m > best else best
     return best
 
-def project_activity(vault, projects_root, pages, active_days=14, skip=("AI Agent",)):
+def project_activity(vault, projects_root, pages, active_days=14, skip=("AI Agent",), mentioned=()):
     """Protokol D:\\CODE: perubahan di proyek dicatat di log dan halaman proyek. Kembalikan (proyek yang berubah
     di hari yang lebih baru daripada log atau halamannya, folder aktif tanpa halaman proyek)."""
     stale, unpaged = [], []
@@ -138,7 +138,7 @@ def project_activity(vault, projects_root, pages, active_days=14, skip=("AI Agen
         if changed is None:
             continue
         if name not in pages:   # folder mata kuliah dicatat di Log/Kuliah/<nama> (D:\KULIAH\AGENTS.md), itu dihitung tercatat
-            logged = any(os.path.isdir(os.path.join(vault, l)) for l in (f"Log/{name}", f"Log/Kuliah/{name}"))
+            logged = name in mentioned or any(os.path.isdir(os.path.join(vault, l)) for l in (f"Log/{name}", f"Log/Kuliah/{name}"))
             if not logged and time.time() - changed < active_days * 86400:
                 unpaged.append((name, day(changed)))
             continue
@@ -287,7 +287,11 @@ def main():
     section("File vault yang memuat teks terlarang (protokol D:\\CODE, Always)", [f"{rel(p)}: {', '.join(f)}" for p, f in forbidden])
     if args.projects_root:
         pages = {os.path.splitext(os.path.basename(p))[0]: (p, text[p]) for p in wiki_pages if os.sep + "projects" + os.sep in p}
-        stale, unpaged = project_activity(args.vault, args.projects_root, pages, args.active_days)
+        # folder yang path-nya disebut di vault (mis. repo tugas yang dirujuk dari log kuliah) dihitung tercatat
+        root = os.path.abspath(args.projects_root).replace("\\", "/").lower().rstrip("/")
+        joined = "\n".join(text.values()).replace("\\", "/").lower()
+        mentioned = {n for n in os.listdir(args.projects_root) if f"{root}/{n.lower()}" in joined}
+        stale, unpaged = project_activity(args.vault, args.projects_root, pages, args.active_days, mentioned=mentioned)
         print("\nMetrik: tanggal file terbaru di folder proyek (tanpa .git, node_modules, venv, build) dibanding tanggal log "
               "terbaru di folder log yang disebut halaman proyek (atau `Log/<nama>`, `Log/Kuliah/<nama>`) dan tanggal halamannya.")
         section("Proyek yang berubah sesudah log atau halaman terakhirnya", [f"{n}: file {c}, catatan {l}" for n, c, l in stale])
