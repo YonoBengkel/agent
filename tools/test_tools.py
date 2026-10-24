@@ -84,10 +84,29 @@ class RuleBackup(unittest.TestCase):
             self.assertEqual(sync_rules.backup(reg, True), 0)        # sudah sama
             open(src, "w", encoding="utf-8").write("aturan baru")
             self.assertEqual(sync_rules.backup(reg, True), 1)        # cadangan basi terdeteksi
+            old = os.path.getmtime(src) - 86400
+            os.utime(src, (old, old))                                 # skrip ganti nama yang mempertahankan tanggal lama
+            self.assertEqual(sync_rules.backup(reg, False), 0)       # sumber berubah: salinan tetap diperbarui
+            dst = sync_rules.backup_path(out, src)
+            self.assertEqual(open(dst, encoding="utf-8").read(), "aturan baru")
+            open(dst, "w", encoding="utf-8").write("disunting di Obsidian")
+            open(src, "w", encoding="utf-8").write("aturan lebih baru")
+            self.assertEqual(sync_rules.backup(reg, False), 1)       # salinan yang disunting dari luar tidak ditimpa
+            self.assertEqual(open(dst, encoding="utf-8").read(), "disunting di Obsidian")
 
     def test_dot_folder_renamed(self):
         import sync_rules
         self.assertIn("dot-claude", sync_rules.backup_path("B", os.path.join("C:" + os.sep, "Users", "x", ".claude", "CLAUDE.md")))
+
+class LogNumbering(unittest.TestCase):
+    def test_missing_and_duplicate(self):
+        import vault_lint
+        log = os.path.join("D:" + os.sep, "V", "Log")
+        paths = [os.path.join(log, "A", n) for n in ("001 satu.md", "002 dua.md", "tanpa nomor.md", "002 kembar.md")]
+        paths += [os.path.join(log, "B", "002 lain folder.md"), os.path.join("D:" + os.sep, "V", "Wiki", "bebas.md")]
+        missing, dup = vault_lint.log_numbering(paths, log)
+        self.assertEqual([os.path.basename(p) for p in missing], ["tanpa nomor.md"])
+        self.assertEqual([os.path.basename(p) for p in dup], ["002 kembar.md"])
 
 if __name__ == "__main__":
     unittest.main()

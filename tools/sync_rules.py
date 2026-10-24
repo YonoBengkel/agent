@@ -54,25 +54,43 @@ def backup(reg, check):
                   if os.path.isfile(os.path.join(folder, f)) and f not in b.get("exclude", [])}
     files = {os.path.abspath(f) for f in files}   # path dari registry dan dari isi folder bisa beda pemisah
     print(f"# Cadangan aturan ke {b['dir']}")
-    problems = 0
+    # Manifest: hash isi yang terakhir ditulis skrip ini per salinan. Salinan yang isinya sudah tidak sama dengan
+    # manifest berarti disunting dari luar (mis. di Obsidian) dan tidak ditimpa. Tanggal ubah tidak dipakai, karena
+    # skrip penggantian nama bisa mempertahankan tanggal lama. Tanpa manifest (pertama kali), salinan yang ada dianggap milik skrip ini.
+    mpath = os.path.join(b["dir"], ".manifest.json")
+    digest = lambda d: hashlib.sha256(d).hexdigest()
+    manifest = json.load(open(mpath, encoding="utf-8")) if os.path.exists(mpath) else None
+    problems, written = 0, {}
     for src in sorted(files):
         dst = backup_path(b["dir"], src)
+        key = os.path.relpath(dst, b["dir"]).replace("\\", "/")
         try:
             data = open(src, "rb").read()
         except OSError as e:
             print(f"  [TIDAK TERJANGKAU] {src}: {e}")
             problems += 1
             continue
-        if os.path.exists(dst) and open(dst, "rb").read() == data:
-            continue
+        if os.path.exists(dst):
+            cur = open(dst, "rb").read()
+            if cur == data:
+                written[key] = digest(data)
+                continue
+            if manifest is not None and manifest.get(key) not in (None, digest(cur)):
+                print(f"  [CADANGAN DISUNTING] {dst}: isinya berbeda dari yang terakhir dicadangkan, jadi tidak ditimpa. "
+                      "Pindahkan suntingannya ke sumber, atau hapus salinan ini supaya dicadangkan ulang.")
+                problems += 1
+                written[key] = manifest[key]
+                continue
         if check:
             print(f"  [CADANGAN BASI] {src}")
             problems += 1
         else:
             os.makedirs(os.path.dirname(dst), exist_ok=True)
             open(dst, "wb").write(data)
+            written[key] = digest(data)
             print(f"  [DICADANGKAN] {src}")
     if not check:
+        json.dump(written, open(mpath, "w", encoding="utf-8"), indent=1, sort_keys=True)
         for name, text in ((".no-vault", ""), ("README.md", b.get("readme", ""))):
             p = os.path.join(b["dir"], name)
             if not os.path.exists(p):
