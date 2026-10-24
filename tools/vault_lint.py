@@ -170,7 +170,7 @@ def main():
 
     files = list(md_files(args.vault))
     names = {os.path.splitext(os.path.basename(p))[0]: p for p in files}
-    text, empty, bom = {}, [], []
+    text, empty, bom, control = {}, [], [], []
     for p in files:
         raw = open(p, "rb").read()
         if not raw.strip():
@@ -178,6 +178,8 @@ def main():
         if raw.startswith(b"\xef\xbb\xbf"):
             bom.append(p)
         text[p] = raw.decode("utf-8", errors="replace")
+        if any(ord(c) < 32 and c not in "\r\n\t" for c in text[p]):   # sisa escape yang rusak, mis. \b atau \f (Pelajaran #11)
+            control.append(p)
 
     canonical = {n: n for n in names}   # nama atau alias → nama file halamannya
     for p, t in text.items():
@@ -250,6 +252,7 @@ def main():
     print(f"Wiki: {len(wiki_pages)} halaman" + (" ⚠️ mendekati batas ±200: siapkan index per folder." if len(wiki_pages) >= 180 else " (batas pantau ±200)."))
     section("File kosong (0 byte / hanya spasi)", [rel(p) for p in empty])
     section("File dengan BOM UTF-8", [rel(p) for p in bom])
+    section("File dengan karakter kontrol (escape backslash yang rusak)", [rel(p) for p in control])
     section("Halaman wiki yatim (tidak ada link masuk dari file lain)", [rel(p) for p in orphans])
     section("Halaman wiki yang tidak tercantum di index.md", [rel(p) for p in not_indexed])
     section("Rujukan path yang tidak ada lagi (halaman wiki dan hot.md)", [f"{rel(p)}: `{s}`" for p, s in dead_paths])
