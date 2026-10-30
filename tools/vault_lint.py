@@ -111,13 +111,14 @@ SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".next", "d
 LOG_FOLDER = re.compile(r"Folder log[^`\n]*`(Log/[^`]+)`")
 day = lambda t: time.strftime("%Y-%m-%d", time.localtime(t))
 
-def latest_mtime(folder, ext=None):
-    """Waktu ubah file terbaru di folder (folder build dan venv dilewati); None kalau tidak ada file."""
+def latest_mtime(folder, ext=None, skip_ext=None):
+    """Waktu ubah file terbaru di folder (folder build dan venv dilewati); None kalau tidak ada file.
+    `ext`: hanya file berakhiran itu; `skip_ext`: lewati file berakhiran itu."""
     best = None
     for dp, dn, fn in os.walk(folder):
         dn[:] = [d for d in dn if d not in SKIP_DIRS and not d.endswith("-venv")]
         for f in fn:
-            if ext and not f.endswith(ext):
+            if (ext and not f.endswith(ext)) or (skip_ext and f.endswith(skip_ext)):
                 continue
             try:
                 m = os.path.getmtime(os.path.join(dp, f))
@@ -149,6 +150,25 @@ def project_activity(vault, projects_root, pages, active_days=14, skip=("AI Agen
         if day(changed) > day(noted):
             stale.append((name, day(changed), day(noted)))
     return stale, unpaged
+
+PROJECT_DOCS = ("ARCHITECTURE.md", "SCHEMA.md")
+
+def stale_docs(projects_root, grace_days=14):
+    """Protokol D:\\CODE: ARCHITECTURE.md dan SCHEMA.md di akar repo diperbarui bersama kode yang dijelaskannya.
+    Kembalikan (proyek, dokumen, tanggal kode, tanggal dokumen) bila file non-.md terbaru lebih baru dari dokumennya
+    lebih dari grace_days hari. Proyek `.no-vault` dilewati, karena bagian itu di luar "Always"."""
+    out = []
+    for name in sorted(os.listdir(projects_root)):
+        folder = os.path.join(projects_root, name)
+        if not os.path.isdir(folder) or os.path.exists(os.path.join(folder, ".no-vault")):
+            continue
+        docs = [d for d in PROJECT_DOCS if os.path.isfile(os.path.join(folder, d))]
+        code = latest_mtime(folder, skip_ext=".md") if docs else None
+        for d in docs:
+            written = os.path.getmtime(os.path.join(folder, d))
+            if code and code - written > grace_days * 86400:
+                out.append((name, d, day(code), day(written)))
+    return out
 
 LOG_NUMBER = re.compile(r"^(\d{3}) ")
 
@@ -317,6 +337,9 @@ def main():
               "terbaru di folder log yang disebut halaman proyek (atau `Log/<nama>`, `Log/Kuliah/<nama>`) dan tanggal halamannya.")
         section("Proyek yang berubah sesudah log atau halaman terakhirnya", [f"{n}: file {c}, catatan {l}" for n, c, l in stale])
         section(f"Folder aktif ({args.active_days} hari) tanpa halaman proyek maupun folder log", [f"{n}: file {c}" for n, c in unpaged])
+        print(f"\nMetrik: tanggal file non-.md terbaru di folder proyek dibanding tanggal `ARCHITECTURE.md`/`SCHEMA.md` di akar repo; "
+              f"didaftar kalau kodenya lebih baru lebih dari {args.active_days} hari. Tanda untuk dicek, bukan bukti dokumennya salah.")
+        section("Dokumen proyek yang lebih tua dari kodenya (protokol D:\\CODE)", [f"{n}/{d}: kode {c}, dokumen {w}" for n, d, c, w in stale_docs(args.projects_root, args.active_days)])
     print("\n## Tidak dicek skrip ini\n- Kontradiksi dan klaim basi antar-catatan: perlu dibaca agent.")
 
 if __name__ == "__main__":

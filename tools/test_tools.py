@@ -66,6 +66,27 @@ class ProjectActivity(unittest.TestCase):
             _, unpaged = vault_lint.project_activity(vault, root, {"P": (page, "")}, mentioned={"Q"})   # Q dirujuk dari log
             self.assertEqual(unpaged, [])
 
+class ProjectDocs(unittest.TestCase):
+    def test_stale_docs(self):
+        import time, tempfile, vault_lint
+        with tempfile.TemporaryDirectory() as d:
+            month = time.time() - 30 * 86400
+            def put(path, mtime=None):
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                open(path, "w", encoding="utf-8").write("x")
+                if mtime:
+                    os.utime(path, (mtime, mtime))
+            put(os.path.join(d, "A", "ARCHITECTURE.md"), month)   # kode hari ini, dokumen sebulan lalu
+            put(os.path.join(d, "A", "app.py"))
+            put(os.path.join(d, "A", "SCHEMA.md"))                # baru diperbarui
+            put(os.path.join(d, "B", "ARCHITECTURE.md"), month)   # yang berubah hanya catatan .md
+            put(os.path.join(d, "B", "app.py"), month)
+            put(os.path.join(d, "B", "notes.md"))
+            put(os.path.join(d, "C", "ARCHITECTURE.md"), month)   # keluar dari vault
+            put(os.path.join(d, "C", "app.py"))
+            put(os.path.join(d, "C", ".no-vault"))
+            self.assertEqual([(n, doc) for n, doc, _, _ in vault_lint.stale_docs(d)], [("A", "ARCHITECTURE.md")])
+
 class RuleBackup(unittest.TestCase):
     def test_backup_and_check(self):
         import tempfile, sync_rules
