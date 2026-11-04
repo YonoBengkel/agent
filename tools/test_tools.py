@@ -41,6 +41,22 @@ class VaultGuard(unittest.TestCase):
         ti = {"old_string": "1234567890123456", "new_string": "<nik>", "edits": [{"new_string": "aman"}]}
         self.assertEqual(g.reasons(g.new_text(ti), [], []), [])
 
+    def test_targets_hermes(self):  # path relatif ke cwd sesi, berkas di patch V4A, dan path gaya Git Bash
+        rel = {"cwd": self.V, "tool_input": {"path": os.path.join("Log", "a.md")}}
+        v4a = {"tool_input": {"patch": "*** Begin Patch\n*** Update File: " + os.path.join(self.V, "a.md") + "\n+x\n*** End Patch"}}
+        bash = {"tool_input": {"path": "/d/Vault Uji/a.md"}}
+        for hook in (rel, v4a, bash):
+            self.assertTrue(any(g.inside(t, self.V) for t in g.targets(hook)), hook)
+        self.assertEqual(g.targets({"tool_input": None}), [])
+
+class SessionContext(unittest.TestCase):
+    def test_project_name(self):
+        import session_context as s
+        root = os.path.join("D:" + os.sep, "CODE")
+        self.assertEqual(s.project_name(root, os.path.join(root, "Con-Fore", "web")), "Con-Fore")
+        self.assertIsNone(s.project_name(root, root))
+        self.assertIsNone(s.project_name(root, os.path.join("D:" + os.sep, "KULIAH")))
+
 class ProjectActivity(unittest.TestCase):
     def test_stale_and_unpaged(self):
         import time, tempfile, vault_lint

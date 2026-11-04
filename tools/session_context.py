@@ -34,21 +34,18 @@ def hot_context(hot):
     return ("Isi hot.md, dimuat otomatis di awal sesi (Aturan 1). Ini cache; detail ada di index.md dan KONTEKS_PROYEK.md.\n\n"
             + text + compile_reminder(os.path.dirname(os.path.abspath(hot))))
 
-def project_context(root, vault, skip):
-    """Mode proyek (D:\\CODE\\AGENTS.md): muat halaman proyek dari vault untuk folder kerja sesi ini."""
-    try:
-        cwd = json.load(sys.stdin).get("cwd") or os.getcwd()
-    except ValueError:
-        cwd = os.getcwd()
+def project_name(root, cwd):
+    """Folder proyek tingkat pertama di bawah root untuk folder kerja ini, atau None kalau di luar root."""
     try:
         rel = os.path.relpath(os.path.abspath(cwd), os.path.abspath(root))
     except ValueError:   # beda drive di Windows
         return None
     if rel == "." or rel.startswith(".."):
         return None
-    project = rel.split(os.sep)[0]
-    if project in skip:
-        return None
+    return rel.split(os.sep)[0]
+
+def project_context(root, vault, project):
+    """Mode proyek (D:\\CODE\\AGENTS.md): muat halaman proyek dari vault untuk folder kerja sesi ini."""
     folder = os.path.join(os.path.abspath(root), project)
     if os.path.exists(os.path.join(folder, ".no-vault")):
         return f"Proyek `{project}` memakai `.no-vault`: jangan membaca atau menulis catatan vault untuk proyek ini (D:\\CODE\\AGENTS.md)."
@@ -73,24 +70,42 @@ def project_context(root, vault, skip):
     return f"{head} Sumber: {page}. Log sesi ditulis ke folder log yang disebut di halaman ini.\n\n{text}"
 
 def main():
-    parser = argparse.ArgumentParser(description="Hook SessionStart: muat hot.md (mode AI Agent) atau halaman proyek dari vault (mode proyek).")
-    parser.add_argument("hot", nargs="?", help="Path ke hot.md (mode AI Agent)")
+    parser = argparse.ArgumentParser(description="Hook awal sesi: muat hot.md (mode AI Agent) atau halaman proyek dari vault (mode proyek).")
+    parser.add_argument("hot", nargs="?", help="Path ke hot.md (mode AI Agent; di mode proyek dipakai untuk proyek yang di-skip)")
     parser.add_argument("--projects-root", help="Folder induk proyek, mis. D:/CODE (mode proyek; folder kerja dibaca dari stdin hook)")
     parser.add_argument("--vault", help="Path vault memori (mode proyek)")
     parser.add_argument("--skip", action="append", default=[], help="Nama folder proyek yang dilewati, mis. 'AI Agent' (boleh diulang)")
+    parser.add_argument("--format", choices=("claude", "hermes"), default="claude",
+                        help="claude: SessionStart Claude Code. hermes: pre_llm_call Hermes, hanya di giliran pertama (2026-11-03)")
     args = parser.parse_args()
 
+    payload = {}
+    if args.projects_root or args.format == "hermes":
+        try:
+            payload = json.load(sys.stdin)
+        except ValueError:
+            payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    if args.format == "hermes" and not (payload.get("extra") or {}).get("is_first_turn"):
+        return   # pre_llm_call jalan di setiap giliran; konteks cukup sekali, di giliran pertama
     if args.projects_root:
         if not args.vault:
             parser.error("--vault wajib di mode proyek")
-        context = project_context(args.projects_root, args.vault, set(args.skip))
+        project = project_name(args.projects_root, payload.get("cwd") or os.getcwd())
+        if project and project in args.skip:
+            context = hot_context(args.hot) if args.hot else None   # mis. AI Agent: halamannya hot.md (Aturan 1)
+        else:
+            context = project_context(args.projects_root, args.vault, project) if project else None
     elif args.hot:
         context = hot_context(args.hot)
     else:
         parser.error("beri path hot.md atau --projects-root")
     if context:
         sys.stdout.reconfigure(encoding="utf-8")
-        print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": context}}, ensure_ascii=False))
+        out = ({"context": context} if args.format == "hermes"
+               else {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": context}})
+        print(json.dumps(out, ensure_ascii=False))
 
 if __name__ == "__main__":
     main()
