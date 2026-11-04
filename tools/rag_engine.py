@@ -12,6 +12,7 @@ from collections import Counter, defaultdict
 # Model embedding disimpan di D: (tools/models), bukan cache default di C: (Aturan 8).
 # Harus di-set sebelum chromadb/sentence-transformers di-import.
 os.environ.setdefault("HF_HOME", os.path.join(os.path.dirname(os.path.abspath(__file__)), "models"))
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
 import chromadb
 
