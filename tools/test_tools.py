@@ -49,6 +49,50 @@ class VaultGuard(unittest.TestCase):
             self.assertTrue(any(g.inside(t, self.V) for t in g.targets(hook)), hook)
         self.assertEqual(g.targets({"tool_input": None}), [])
 
+    def test_shell_fence(self):  # pagar terminal Hermes: tulis dan hapus ditolak, baca dan tulisan di luar lolos
+        v = self.V.replace(os.sep, "/")
+        def kena(command, cwd="D:/CODE", **ti):
+            return bool(g.shell_touches({"tool_name": "terminal", "cwd": cwd, "tool_input": {"command": command, **ti}}, [self.V]))
+        for c in (f'echo x > "{v}/a.md"', f'rm -f "{v}/a.md"', r'rm /d/Vault\ Uji/a.md', r'del "D:\Vault Uji\a.md"', f'cd "{v}"',
+                  f'cd "{v}" && rm a.md', 'rm -rf "D:/"', f'ls "{v}" | xargs rm', f'V="{v}"; rm "$V/a.md"', f'sed -i s/a/b/ "{v}/a.md"',
+                  f'find "{v}" -delete', f'''bash -c "rm '{v}/a.md'"''', f'Remove-Item "{v}/a.md"'):
+            self.assertTrue(kena(c), c)
+        for c in (f'ls "{v}" 2>/dev/null', f'cat "{v}/a.md" 2>&1', f'grep -r "a > b" "{v}" > /tmp/o', f'echo "rm {v}/a.md"',
+                  'echo x > /tmp/o', 'rm -f D:/CODE/a.txt', f'rm "{v}2/a.md"', f'''bash -c "cat '{v}/a.md'"''', ''):
+            self.assertFalse(kena(c), c)
+        self.assertTrue(kena("rm a.md", cwd=v))
+        self.assertTrue(kena("ls", workdir=v))
+        self.assertEqual(g.shell_touches({"tool_name": "terminal", "tool_input": None}, [self.V]), [])
+        kode = {"tool_name": "execute_code", "tool_input": {"code": f"open('{v}/a.md', 'w')"}}
+        self.assertTrue(g.shell_touches(kode, [self.V]))
+        self.assertFalse(g.shell_touches({"tool_name": "execute_code", "tool_input": {"code": "print(1)"}}, [self.V]))
+
+    def test_protect_closes_reads(self):  # vault pribadi di Hermes: baca dan tulis ditolak, termasuk lewat folder induknya
+        p = "D:/Vault Pribadi"
+        def kena(tool, cwd="D:/CODE", **ti):
+            return bool(g.opened({"tool_name": tool, "cwd": cwd, "tool_input": ti}, [p]))
+        for c in (f'cat "{p}/a.md"', f'ls "{p}"', f'grep -r x "{p}"', r'type "D:\Vault Pribadi\a.md"', r'cat /d/Vault\ Pribadi/a.md',
+                  r'cat /mnt/d/Vault\ Pribadi/a.md', f'git -C "{p}" log', f'''bash -c "cat '{p}/a.md'"''',
+                  f'''python -c "print(open('{p}/a.md').read())"''', f'cat "{p}"/*.md', 'grep -r x "D:/"', 'find / -name a.md',
+                  'ls D:/Vault*/', '''bash -c "grep -r x 'D:/'"''', f'Get-Content -Path "{p}/a.md"'):
+            self.assertTrue(kena("terminal", command=c), c)
+        for c in ('cat "D:/CODE/a.txt"', 'ls', 'grep -r x "D:/CODE"', f'cat "{p}2/a.md"', 'dir /d /b', 'cmd /d /c dir', 'echo halo', ''):
+            self.assertFalse(kena("terminal", command=c), c)
+        self.assertTrue(kena("terminal", command="ls", cwd=p))
+        for tool, ti in (("read_file", {"path": f"{p}/a.md"}), ("read_file", {"path": "a.md", "cwd": p}), ("search_files", {"pattern": "x", "path": "D:/"}),
+                         ("search_files", {"pattern": "x", "cwd": p}), ("search_files", {"pattern": f"{p}/**", "target": "files"}),
+                         ("browser_navigate", {"url": "file:///D:/Vault%20Pribadi/a.html"}), ("vision_analyze", {"image_url": f"{p}/a.png", "question": "apa"}),
+                         ("web_extract", {"urls": [f"file:///{p}/a.html"]}), ("execute_code", {"code": f"open('{p}/a.md').read()"}),
+                         ("execute_code", {"code": "import os; list(os.walk('D:/'))"}), ("execute_code", {"code": f'open(r"{p}/a.md")'}),
+                         ("execute_code", {"code": 'list(os.walk(r"D:/"))'}), ("write_file", {"path": f"{p}/a.md", "content": "x"})):
+            self.assertTrue(kena(tool, **ti), (tool, ti))
+        for tool, ti in (("read_file", {"path": "D:/CODE/a.md"}), ("search_files", {"pattern": "x"}), ("search_files", {"pattern": "x", "path": "D:/CODE"}),
+                         ("web_extract", {"urls": ["https://example.com/a"]}), ("execute_code", {"code": "print(1)"}),
+                         ("write_file", {"path": "D:/CODE/a.md", "content": f"lihat {p}"})):
+            self.assertFalse(kena(tool, **ti), (tool, ti))
+        self.assertEqual(g.opened({"tool_name": "terminal", "tool_input": None}, [p]), [])
+        self.assertEqual(g.opened({"tool_name": "Read", "tool_input": {"file_path": f"{p}/a.md"}}, []), [])  # Claude tanpa --protect
+
 class SessionContext(unittest.TestCase):
     def test_project_name(self):
         import session_context as s

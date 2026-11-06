@@ -14,7 +14,7 @@ percakapan, dan konfigurasi — tidak ikut terbit.
 | `rag_engine.py` | Retrieval hibrida atas vault Markdown: BM25 + embedding, index inkremental, judul bagian per chunk |
 | `rag_eval.py` | Harness evaluasi: recall, precision, dan MRR terhadap set soal berlabel, dengan pemisahan dev/holdout, plus uji randomisasi berpasangan (`--compare`) untuk membandingkan dua hasil |
 | `vault_lint.py` | Penjaga mutu catatan: cari tautan putus, catatan yatim, pelanggaran format, nilai secret dan teks terlarang di dalam catatan, serta proyek yang berubah tanpa catatan |
-| `vault_guard.py` | Hook PreToolUse untuk coding agent: menolak tulisan ke vault yang memuat nomor identitas, kata terlarang, atau secret (gagal berarti tolak) |
+| `vault_guard.py` | Hook PreToolUse untuk coding agent: menolak tulisan ke vault yang memuat nomor identitas, kata terlarang, atau secret (gagal berarti tolak). Di Hermes juga pagar `terminal` dan `execute_code`, dan opsi `--protect` yang menutup folder dari pembacaan dan penulisan |
 | `test_tools.py` | Tes kecil untuk logika skrip di atas |
 | `sync_rules.py` | Menjaga berkas aturan yang punya beberapa salinan dan terjemahan tetap sinkron, lengkap dengan mode `--check` untuk CI |
 | `session_context.py` | Merakit konteks awal satu sesi agent dari vault |
