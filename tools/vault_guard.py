@@ -6,6 +6,8 @@
    folder ke vault, apa pun isinya. Kode execute_code ditolak kalau menyebut path vault.
 3. Folder --protect (vault pribadi, sejak 2026-11-06): tolak setiap tool yang masuk ke hook kalau membaca, menulis, atau
    mencakup folder itu, termasuk lewat folder induknya. Claude Code tidak memakai opsi ini, karena aturan deny-nya sudah menutup.
+4. Opsi --worker untuk pekerja oper_kerja.py (sejak 2026-11-07): hanya alat berkas, dan baca maupun tulis dikunci ke folder
+   sesinya. Berkas pagar-aktif di folder tugas membuktikan ke oper_kerja.py bahwa hook ini benar-benar berjalan.
 Input JSON hook di stdin; keluar 2 dengan alasan di stderr berarti diblokir, 0 berarti lanjut. Gagal memeriksa juga keluar 2
 (fail closed). Batas: hanya pola yang dikenali. Skrip, path yang dirakit saat jalan, dan cd bertahap lintas panggilan tidak
 terlihat, jadi vault_lint.py tetap cek terakhir untuk tulisan. Membaca vault memori tidak dihalangi."""
@@ -13,6 +15,9 @@ import os
 import re
 import sys
 import json
+import fnmatch
+import pathlib
+import sqlite3
 import argparse
 from urllib.parse import unquote
 
@@ -23,7 +28,10 @@ NOMOR = re.compile(r"(?<!\d)\d{16}(?!\d)")       # NIK dan nomor KK: 16 digit (N
 PLACEHOLDER = ("<", "[", "$", "{", "*", ".", "%")  # API_KEY=<kunci>, TOKEN: [DISENSOR], ${VAR} bukan secret
 WRITE_TOOLS = ("Write", "Edit", "MultiEdit", "write_file", "patch")  # Claude Code, lalu Hermes
 SHELL_TOOLS = ("terminal", "execute_code")  # Hermes
-V4A_FILE = re.compile(r"(?m)^\*\*\* (?:Add File|Update File|Move to): *(.+?) *$")  # berkas di patch V4A Hermes
+V4A_FILE = re.compile(r"(?m)^\*\*\*[ \t]*(?:Add[ \t]+File|Update[ \t]+File|Delete[ \t]+File|Move[ \t]+File|Move[ \t]+to):[ \t]*(.+?)[ \t\r]*$")  # sama longgarnya dengan pengurai patch Hermes
+DRIVE_RELATIVE = re.compile(r"^[a-zA-Z]:(?![\\/])")  # C:a.md: relatif ke folder aktif drive itu, bukan ke folder sesi
+WORKER_TOOLS = ("read_file", "write_file", "patch", "search_files")  # toolset file Hermes
+WORKER_CLOSED = ("*.env", "*.env.*", "*.kredensial*", "*.pem", "*id_rsa*")  # berkas kredensial, juga untuk pekerja OpenCode
 GIT_BASH = re.compile(r"^/([a-zA-Z])(?:/|$)")  # /d/... menjadi D:/...
 
 # Satu potongan perintah shell: pemisah, redirect, atau kata (boleh berisi kutipan dan spasi yang di-escape)
@@ -58,13 +66,18 @@ def new_text(tool_input):
     return "\n".join(str(t) for t in [tool_input.get("content"), tool_input.get("new_string"),
                                       tool_input.get("patch"), *edits] if t)
 
-def targets(hook):
-    """Path tujuan: file_path (Claude), path (Hermes, bisa relatif ke cwd sesi), dan berkas di patch V4A Hermes.
+def raw_targets(hook):
+    """Path tujuan apa adanya: file_path (Claude), path (Hermes), dan berkas di patch V4A Hermes.
     Path gaya Git Bash (/d/...) diubah ke D:/... supaya tetap dikenali."""
     ti = hook.get("tool_input") or {}
+    patched = [x for f in V4A_FILE.findall(str(ti.get("patch") or "")) for x in re.split(r"\s*->\s*", f)]  # Move File: a -> b
+    paths = [ti.get("file_path"), ti.get("path"), *patched]
+    return [GIT_BASH.sub(r"\1:/", str(p).strip()) for p in paths if p and str(p).strip()]
+
+def targets(hook):
+    """Path tujuan penuh, yang relatif dinilai dari cwd hook."""
     base = str(hook.get("cwd") or os.getcwd())
-    paths = [ti.get("file_path"), ti.get("path"), *V4A_FILE.findall(str(ti.get("patch") or ""))]
-    return [os.path.join(base, GIT_BASH.sub(r"\1:/", str(p).strip())) for p in paths if p and str(p).strip()]
+    return [os.path.join(base, os.path.expanduser(p)) for p in raw_targets(hook)]
 
 def inside(path, folder):
     path, folder = (os.path.normcase(os.path.abspath(p)) for p in (path, folder))
@@ -201,6 +214,41 @@ def opened(hook, folders):
         found += touches(p, base, folders)
     return list(dict.fromkeys(found))
 
+def session_cwd(hook):
+    """Folder sesi Hermes dari state.db. Semua sesi jalan di satu gateway, jadi cwd di payload hanyalah folder gateway."""
+    home, session = os.environ.get("HERMES_HOME"), hook.get("session_id")
+    if hook.get("hook_event_name") != "pre_tool_call" or not home or not session:
+        return None
+    try:
+        db = sqlite3.connect(pathlib.Path(home, "state.db").as_uri() + "?mode=ro", uri=True, timeout=5)
+        try:
+            row = db.execute("SELECT cwd FROM sessions WHERE id = ?", (session,)).fetchone()
+        finally:
+            db.close()
+    except (sqlite3.Error, ValueError):
+        return None
+    return row[0] if row and row[0] else None
+
+def worker_refusal(hook, folder):
+    """Alasan menolak panggilan pekerja oper_kerja.py, atau None. Path dibandingkan sesudah symlink diikuti."""
+    tool = hook.get("tool_name")
+    if tool not in WORKER_TOOLS:
+        return f"alat {tool} tidak tersedia untuk pekerja"
+    if not folder:
+        return "folder sesi pekerja tidak diketahui"
+    if any(DRIVE_RELATIVE.match(p) for p in raw_targets(hook)):
+        return "path tanpa folder setelah nama drive tidak diterima"
+    paths = targets({**hook, "cwd": folder})
+    for p in paths:
+        if not inside(os.path.realpath(p), os.path.realpath(folder)):
+            return f"{p} ada di luar folder kerja tugas ini"
+        if any(fnmatch.fnmatch(os.path.basename(p).lower(), c) for c in WORKER_CLOSED):
+            return f"{os.path.basename(p)} berkas kredensial, jadi tidak dibuka pekerja"
+    # path yang tidak ada dipecah Hermes menjadi beberapa path ("a.py, D:/lain"), lalu yang ada ikut dicari
+    if tool == "search_files" and not all(os.path.exists(p) for p in paths):
+        return "path pencarian harus satu folder atau berkas yang ada di folder kerja"
+    return None
+
 def main():
     sys.stderr.reconfigure(encoding="utf-8")
     p = argparse.ArgumentParser(description="Hook sebelum tool jalan: tolak tulisan ke vault yang memuat data pribadi atau secret, tulisan lewat shell Hermes, dan semua akses ke folder --protect.")
@@ -208,11 +256,22 @@ def main():
     p.add_argument("--words", help="File daftar kata terlarang (lokal, tidak di-commit)")
     p.add_argument("--secrets-from", action="append", default=[], help="File konfigurasi yang nilai secret-nya ikut dicari (boleh diulang)")
     p.add_argument("--protect", action="append", default=[], help="Folder yang tidak boleh dibaca atau ditulis sama sekali, misalnya vault pribadi (boleh diulang)")
+    p.add_argument("--worker", action="store_true", help="Pekerja oper_kerja.py: hanya alat berkas, dan hanya di folder sesinya")
     a = p.parse_args()  # argumen salah: argparse keluar dengan kode 2, jadi tetap diblokir
     try:
         hook = json.loads(sys.stdin.buffer.read().decode("utf-8"))
         ti = hook.get("tool_input") or {}
         tool = hook.get("tool_name")
+        folder = session_cwd(hook)
+        if folder:
+            hook["cwd"] = folder  # path relatif Hermes berarti relatif ke folder sesi
+        if a.worker:
+            if folder and pathlib.Path(folder).parent.joinpath("tugas.md").exists():
+                pathlib.Path(folder).parent.joinpath("pagar-aktif").touch()
+            refused = worker_refusal(hook, folder)
+            if refused:
+                print(f"Ditolak penjaga vault: {refused}. Kerjakan di dalam folder kerja saja.", file=sys.stderr)
+                return 2
         closed = opened(hook, a.protect)
         if closed:
             print(f"Ditolak penjaga vault: panggilan {tool} ini membuka atau mencakup {closed[0]}, vault pribadi yang tidak boleh "

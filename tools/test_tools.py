@@ -93,6 +93,194 @@ class VaultGuard(unittest.TestCase):
         self.assertEqual(g.opened({"tool_name": "terminal", "tool_input": None}, [p]), [])
         self.assertEqual(g.opened({"tool_name": "Read", "tool_input": {"file_path": f"{p}/a.md"}}, []), [])  # Claude tanpa --protect
 
+    def test_worker_refusal(self):  # pekerja oper_kerja: hanya alat berkas, dan hanya di folder sesinya
+        akar = os.path.join("D:" + os.sep, "Oper", "1", "kerja")
+        def tolak(tool, folder=akar, **ti):
+            return g.worker_refusal({"tool_name": tool, "cwd": "D:/gateway", "tool_input": ti}, folder)
+        for tool, ti in (("read_file", {"path": "a.md"}), ("read_file", {"path": f"{akar}/sub/a.md"}), ("search_files", {"pattern": "x"}),
+                         ("write_file", {"path": "a.md", "content": "x"}),
+                         ("patch", {"mode": "patch", "patch": "*** Begin Patch\n*** Update File: a.py\n*** End Patch"})):
+            self.assertIsNone(tolak(tool, **ti), (tool, ti))
+        for tool, ti in (("read_file", {"path": "D:/CODE/a.md"}), ("read_file", {"path": "../a.md"}), ("read_file", {"path": "~/.ssh/id_rsa"}),
+                         ("read_file", {"path": "/d/CODE/a.md"}), ("read_file", {"path": "sub/../../a.md"}), ("search_files", {"pattern": "x", "path": "D:/"}),
+                         ("write_file", {"path": "D:/CODE/a.md", "content": "x"}), ("patch", {"path": "../a.py", "old_string": "a", "new_string": "b"}),
+                         ("patch", {"patch": "*** Add File: ../a.py"}), ("patch", {"patch": "*** Delete File: ../a.py"}),
+                         ("patch", {"patch": "*** Move File: a.py -> ../../b.py"}), ("patch", {"patch": "*** Update File: a.py\n*** Move to: ../b.py"}),
+                         ("patch", {"patch": "***Add   File:../a.py"}), ("patch", {"patch": "*** Move File: a.py->../b.py"}),
+                         ("read_file", {"path": "D:a.md"}), ("read_file", {"path": "C:a.md"}), ("search_files", {"pattern": "x", "path": "a.py, D:/CODE"}),
+                         ("search_files", {"pattern": "x", "path": "a.py D:/CODE"}),
+                         ("read_file", {"path": ".env"}), ("read_file", {"path": "sub/kunci.PEM"}), ("write_file", {"path": ".env.lokal", "content": "x"}),
+                         ("terminal", {"command": "dir"}), ("execute_code", {"code": "print(1)"}), ("web_extract", {"urls": ["https://example.com"]})):
+            self.assertTrue(tolak(tool, **ti), (tool, ti))
+        self.assertTrue(tolak("read_file", folder=None, path="a.md"))  # folder sesi tidak ketemu: tolak, jangan lolos
+        import tempfile
+        with tempfile.TemporaryDirectory() as t:  # path pencarian yang ada boleh, walau memuat spasi
+            os.mkdir(os.path.join(t, "sub folder"))
+            self.assertIsNone(g.worker_refusal({"tool_name": "search_files", "tool_input": {"pattern": "x", "path": "sub folder"}}, t))
+
+    def test_worker_main(self):  # hook sungguhan dengan state.db tiruan, seperti yang dijalankan gateway
+        import json, sqlite3, subprocess, tempfile
+        skrip = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vault_guard.py")
+        with tempfile.TemporaryDirectory() as t:
+            tugas, kerja, vault = os.path.join(t, "oper", "1"), os.path.join(t, "oper", "1", "kerja"), os.path.join(t, "Vault")
+            os.makedirs(kerja)
+            os.makedirs(vault)
+            open(os.path.join(tugas, "tugas.md"), "w").close()
+            db = sqlite3.connect(os.path.join(t, "state.db"))
+            db.execute("CREATE TABLE sessions (id TEXT, cwd TEXT)")
+            db.executemany("INSERT INTO sessions VALUES (?, ?)", [("pekerja", kerja), ("biasa", vault)])
+            db.commit()
+            db.close()
+            def kode(sesi, tool, *opsi, **ti):
+                masuk = json.dumps({"hook_event_name": "pre_tool_call", "session_id": sesi, "cwd": t, "tool_name": tool, "tool_input": ti})
+                return subprocess.run([sys.executable, "-B", skrip, "--vault", vault, *opsi], input=masuk.encode("utf-8"), capture_output=True,
+                                      env={**os.environ, "HERMES_HOME": t}).returncode
+            self.assertEqual(kode("pekerja", "read_file", "--worker", path="a.py"), 0)
+            self.assertTrue(os.path.exists(os.path.join(tugas, "pagar-aktif")))
+            self.assertEqual(kode("pekerja", "read_file", "--worker", path=os.path.join(t, "rahasia.md")), 2)
+            self.assertEqual(kode("pekerja", "terminal", "--worker", command="dir"), 2)
+            self.assertEqual(kode("hilang", "read_file", "--worker", path="a.py"), 2)
+            self.assertEqual(kode("biasa", "read_file", path=os.path.join(t, "lain.md")), 0)  # sesi biasa tidak terkunci
+            # path relatif dinilai dari folder sesi, bukan folder gateway. Nomor palsu ini tidak boleh lolos ke vault
+            self.assertEqual(kode("biasa", "write_file", path="a.md", content="NIK 1234567890123456"), 2)
+
+    def test_session_cwd(self):  # payload Hermes membawa folder gateway, folder sesi yang benar ada di state.db
+        import sqlite3, tempfile
+        with tempfile.TemporaryDirectory() as home:
+            db = sqlite3.connect(os.path.join(home, "state.db"))
+            db.execute("CREATE TABLE sessions (id TEXT, cwd TEXT)")
+            db.execute("INSERT INTO sessions VALUES ('s1', 'D:/Kerja')")
+            db.commit()
+            db.close()
+            asli = os.environ.get("HERMES_HOME")
+            os.environ["HERMES_HOME"] = home
+            try:
+                kait = {"hook_event_name": "pre_tool_call", "session_id": "s1"}
+                self.assertEqual(g.session_cwd(kait), "D:/Kerja")
+                self.assertIsNone(g.session_cwd({**kait, "session_id": "lain"}))
+                self.assertIsNone(g.session_cwd({**kait, "hook_event_name": "PreToolUse"}))  # Claude Code: payload-nya sudah benar
+            finally:
+                os.environ.pop("HERMES_HOME") if asli is None else os.environ.__setitem__("HERMES_HOME", asli)
+        self.assertEqual(g.targets({"cwd": "D:/Kerja", "tool_input": {"path": "a.md"}}), [os.path.join("D:/Kerja", "a.md")])
+
+class OperKerja(unittest.TestCase):
+    def setUp(self):
+        import oper_kerja
+        self.o = oper_kerja
+
+    def test_baca_hasil_agen(self):
+        h = self.o.baca_hermes(['{"type":"text","text":"a"}', "bukan json", '{"type":"result","text":" selesai ","tokens":9,"exit_code":0}'])
+        self.assertEqual((h["teks"], h["token"], h["kode"]), ("selesai", 9, 0))
+        o = self.o.baca_opencode(['{"type":"text","part":{"text":"satu"}}', '{"type":"step_finish","part":{"tokens":{"input":2,"output":3,"cache":{"read":4}}}}',
+                                  '{"type":"step_finish","part":{"tokens":{"input":1,"output":1}}}', '{"type":"error","error":{"name":"FreeUsageLimitError"}}'])
+        self.assertEqual(o["teks"], "satu")
+        self.assertEqual(o["token"], {"input": 3, "output": 4, "cache": 4})
+        self.assertEqual(o["kode"], 1)
+
+    def test_izin_ketat(self):  # pekerja OpenCode tidak boleh dapat shell, web, atau folder di luar worktree
+        i = self.o.izin_opencode()
+        self.assertEqual((i["*"], i["external_directory"]), ("deny", "deny"))
+        self.assertFalse({"bash", "webfetch", "websearch", "task"} & set(i))
+        self.assertEqual(i["read"]["*.env"], "deny")
+        perintah, env, _ = self.o.perintah_opencode("D:/x", None)
+        self.assertNotIn("--auto", perintah)
+        self.assertEqual(env["OPENCODE_DISABLE_CLAUDE_CODE"], "1")
+        perintah, env, _ = self.o.perintah_hermes("D:/oper/1/kerja", None, "D:/q.txt")
+        self.assertEqual(perintah[perintah.index("-t") + 1], "file")
+        self.assertEqual(perintah[perintah.index("-p") + 1], self.o.PROFIL_HERMES)
+        self.assertNotIn("HERMES_WRITE_SAFE_ROOT", env)  # lewat klien, nilai ini bisa ikut mengunci sesi biasa di gateway yang sama
+
+    def test_pagar_harus_terbukti(self):  # Hermes selesai tanpa jejak hook: hasilnya tidak dipakai
+        import json, pathlib, sys, tempfile
+        keluaran = json.dumps({"type": "result", "text": "selesai", "tokens": {}, "exit_code": 0})
+        tiruan = lambda kerja, model, berkas: ([sys.executable, "-c", f"print({keluaran!r})"], None, self.o.baca_hermes)
+        lama = self.o.perintah_hermes, self.o.penjaga_hermes_aktif, self.o.urllib.request.urlopen
+        self.o.perintah_hermes, self.o.penjaga_hermes_aktif, self.o.urllib.request.urlopen = tiruan, lambda home: True, lambda *a, **k: None
+        def pulihkan():
+            self.o.perintah_hermes, self.o.penjaga_hermes_aktif, self.o.urllib.request.urlopen = lama
+        self.addCleanup(pulihkan)
+        with tempfile.TemporaryDirectory() as t:
+            folder = pathlib.Path(t)
+            self.assertEqual(self.o.jalankan_agen("hermes", t, folder, "tugas", None, 30)["kode_keluar"], "pagar tidak terbukti")
+            (folder / "pagar-aktif").touch()
+            self.assertEqual(self.o.jalankan_agen("hermes", t, folder, "tugas", None, 30)["kode_keluar"], 0)
+
+    def test_di_luar_izin(self):
+        self.assertEqual(self.o.di_luar_izin(["a.py", "t/b.py"], ["a.py"]), ["t/b.py"])
+        self.assertEqual(self.o.di_luar_izin(["a.py"], []), [])
+
+    def test_penjaga_hermes(self):
+        import json, tempfile
+        with tempfile.TemporaryDirectory() as h:
+            self.assertFalse(self.o.penjaga_hermes_aktif(h))
+            perintah = 'python "x/vault_guard.py" --vault "v" --worker'
+            with open(os.path.join(h, "config.yaml"), "w", encoding="utf-8") as f:
+                f.write("command: '" + perintah + "'\n")
+            with open(os.path.join(h, "shell-hooks-allowlist.json"), "w", encoding="utf-8") as f:
+                json.dump({"approvals": [{"event": "pre_tool_call", "command": perintah + " --lama"}]}, f)
+            self.assertFalse(self.o.penjaga_hermes_aktif(h))  # perintah di config berubah sesudah disetujui
+            with open(os.path.join(h, "shell-hooks-allowlist.json"), "w", encoding="utf-8") as f:
+                json.dump({"approvals": [{"event": "pre_tool_call", "command": perintah}]}, f)
+            self.assertTrue(self.o.penjaga_hermes_aktif(h))
+
+    def test_alur(self):  # repo sungguhan dengan agent tiruan: folder utama tidak tersentuh sampai diterapkan
+        import argparse, contextlib, io, json, pathlib, subprocess, tempfile
+        def git(*a):
+            subprocess.run(["git", "-C", str(repo), *a], check=True, capture_output=True)
+        def tiruan(agen, kerja, folder, kueri, model, batas):
+            (kerja / "baru.txt").write_text("halo", encoding="utf-8")
+            return {"agen": agen, "kode_keluar": 0, "teks": "selesai", "detik": 0}
+        asli, self.o.jalankan_agen = self.o.jalankan_agen, tiruan
+        self.addCleanup(setattr, self.o, "jalankan_agen", asli)
+        with tempfile.TemporaryDirectory() as t:
+            repo, akar = pathlib.Path(t, "repo"), pathlib.Path(t, "oper")
+            repo.mkdir()
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            git("config", "user.name", "uji")
+            git("config", "user.email", "uji@contoh.test")
+            (repo / "a.txt").write_text("a", encoding="utf-8")
+            git("add", "-A")
+            git("commit", "-qm", "awal")
+            tugas = pathlib.Path(t, "tugas.md")
+            tugas.write_text("Tambah berkas.", encoding="utf-8")
+            a = argparse.Namespace(repo=str(repo), tugas=str(tugas), agen="opencode", model=None, cek="git status --short", boleh=["a.txt"],
+                                   batas=9, akar=str(akar), secrets_from=[])
+            keluar = io.StringIO()
+            with contextlib.redirect_stdout(keluar):
+                self.o.jalan(a)
+            h = json.loads(keluar.getvalue())
+            self.assertEqual((h["status"], h["berkas"], h["di_luar_izin"], h["folder_utama_berubah"]), ("selesai", ["baru.txt"], ["baru.txt"], False))
+            self.assertNotIn("cek", h)  # kode buatan pekerja tidak jalan sebelum patch-nya dibaca
+            self.assertFalse((repo / "baru.txt").exists())
+            b = argparse.Namespace(id=h["id"], akar=str(akar), tanpa_uji=False)
+            keluar = io.StringIO()
+            with contextlib.redirect_stdout(keluar):
+                self.o.cek(b)
+            self.assertEqual(json.loads(keluar.getvalue())["cek"]["kode_keluar"], 0)
+            berkas_git = pathlib.Path(h["folder"], "kerja", ".git")  # pekerja mengganti .git: git tidak boleh dijalankan di sana
+            asli_git = berkas_git.read_text(encoding="utf-8")
+            def timpa(isi):  # berkas ini tersembunyi di Windows, dan mode w ditolak untuk berkas tersembunyi
+                with open(berkas_git, "r+", encoding="utf-8") as f:
+                    f.write(isi)
+                    f.truncate()
+            timpa("gitdir: palsu\n")
+            with self.assertRaises(SystemExit):
+                self.o.cek(b)
+            timpa(asli_git)
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.o.terapkan(b)
+                self.o.buang(b)
+            self.assertTrue((repo / "baru.txt").exists())
+            self.assertFalse(pathlib.Path(h["folder"], "kerja").exists())
+            self.assertTrue(pathlib.Path(h["folder"], "perubahan.patch").exists())
+            tugas.write_text("NIK 1234567890123456", encoding="utf-8")  # isi palsu: tugas terkirim ke penyedia model gratis
+            with self.assertRaises(SystemExit):
+                self.o.jalan(a)
+            tugas.write_text("Tambah berkas.", encoding="utf-8")
+            (repo / ".no-vault").write_text("", encoding="utf-8")
+            with self.assertRaises(SystemExit):
+                self.o.jalan(a)
+
 class SessionContext(unittest.TestCase):
     def test_project_name(self):
         import session_context as s
