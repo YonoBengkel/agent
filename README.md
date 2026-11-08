@@ -1,8 +1,8 @@
 # Perkakas workspace agent
 
-Sepuluh skrip Python tanpa dependensi berat yang menjalankan satu *knowledge workspace*
+Sebelas skrip Python tanpa dependensi berat yang menjalankan satu *knowledge workspace*
 berbasis Markdown untuk coding agent: pencarian atas catatan, evaluasi kualitas
-pencariannya, penjagaan mutu catatan, penjaga tulisan ke catatan, penyensoran transkrip, dan pengoperan tugas kecil ke agent gratis.
+pencariannya, penjagaan mutu catatan, penjaga tulisan ke catatan, penyensoran transkrip, pengoperan tugas kecil ke agent gratis, dan uji untuk setiap skill dan tool yang dipetakan.
 
 Repo ini sengaja hanya memuat perkakasnya. Isi workspace-nya sendiri — catatan, transkrip
 percakapan, dan konfigurasi — tidak ikut terbit.
@@ -16,6 +16,7 @@ percakapan, dan konfigurasi — tidak ikut terbit.
 | `vault_lint.py` | Penjaga mutu catatan: cari tautan putus, catatan yatim, pelanggaran format, nilai secret dan teks terlarang di dalam catatan, serta proyek yang berubah tanpa catatan |
 | `vault_guard.py` | Hook PreToolUse untuk coding agent: menolak tulisan ke vault yang memuat nomor identitas, kata terlarang, atau secret (gagal berarti tolak). Di Hermes juga pagar `terminal` dan `execute_code`, dan opsi `--protect` yang menutup folder dari pembacaan dan penulisan |
 | `oper_kerja.py` | Mengoper tugas kode kecil ke agent gratis (OpenCode, Hermes) di git worktree terpisah. Agent hanya punya alat berkas yang dikunci ke worktree, buktinya diambil dari git, dan kode buatannya baru dijalankan sesudah patch dibaca |
+| `uji_peta.py` | Menguji setiap baris peta kemampuan workspace: skill diperiksa frontmatter, path yang dirujuk, sintaks skrip, dan uji bawaannya, sedangkan tool dijalankan uji asapnya. Tool baru tanpa uji asap dilaporkan GAGAL |
 | `test_tools.py` | Tes kecil untuk logika skrip di atas |
 | `sync_rules.py` | Menjaga berkas aturan yang punya beberapa salinan dan terjemahan tetap sinkron, lengkap dengan mode `--check` untuk CI |
 | `session_context.py` | Merakit konteks awal satu sesi agent dari vault |
@@ -73,6 +74,7 @@ python tools/rag_eval.py   <folder> --set eval/soal.jsonl --k 5
 python tools/rag_eval.py   --compare hasil_a.json hasil_b.json
 python tools/vault_lint.py <folder> --secrets-from .env --words kata_terlarang.txt --projects-root <folder-proyek>
 python tools/test_tools.py
+python tools/uji_peta.py   [--peta <peta.md>] [--berat] [--laporan <hasil.md>]
 ```
 
 Set soal evaluasi tidak ikut terbit karena menunjuk ke catatan pribadi; formatnya satu objek

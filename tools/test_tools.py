@@ -281,6 +281,24 @@ class OperKerja(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 self.o.jalan(a)
 
+class UjiPeta(unittest.TestCase):
+    def test_baca_peta(self):  # baris skill dan tool dibaca dari tabel bagian 1 dan 2, bagian lain diabaikan
+        import uji_peta
+        peta = """## 1. Peta Skills
+| Nama Skill | Kapan | Path Berkas | Operator |
+|---|---|---|---|
+| `contoh` | uji | `contoh/SKILL.md` | Universal |
+## 2. Peta Tools CLI
+| Nama Tool | Fungsi | Perintah |
+|---|---|---|
+| `alat.py` | uji | `python alat.py` |
+## 3. Matriks
+| `bukan` | x | y |
+"""
+        self.assertEqual(uji_peta.baca_peta(peta), ([("contoh", "contoh/SKILL.md")], ["alat.py"]))
+        self.assertEqual(uji_peta.frontmatter("---\nname: contoh\ndescription: >\n  uji\n---\n# isi")["name"], "contoh")
+        self.assertEqual(uji_peta.uji_tool("alat-baru.py", ".", False).status, uji_peta.GAGAL)  # tool tanpa uji asap ditolak
+
 class SessionContext(unittest.TestCase):
     def test_project_name(self):
         import session_context as s
