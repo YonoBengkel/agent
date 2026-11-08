@@ -1,8 +1,8 @@
 # Perkakas workspace agent
 
-Sebelas skrip Python tanpa dependensi berat yang menjalankan satu *knowledge workspace*
+Dua belas skrip Python tanpa dependensi berat yang menjalankan satu *knowledge workspace*
 berbasis Markdown untuk coding agent: pencarian atas catatan, evaluasi kualitas
-pencariannya, penjagaan mutu catatan, penjaga tulisan ke catatan, penyensoran transkrip, pengoperan tugas kecil ke agent gratis, dan uji untuk setiap skill dan tool yang dipetakan.
+pencariannya, penjagaan mutu catatan, penjaga tulisan ke catatan, penyensoran transkrip, pengoperan tugas kecil ke agent gratis, penjaga aturan desain, dan uji untuk setiap skill dan tool yang dipetakan.
 
 Repo ini sengaja hanya memuat perkakasnya. Isi workspace-nya sendiri — catatan, transkrip
 percakapan, dan konfigurasi — tidak ikut terbit.
@@ -19,7 +19,8 @@ percakapan, dan konfigurasi — tidak ikut terbit.
 | `uji_peta.py` | Menguji setiap baris peta kemampuan workspace: skill diperiksa frontmatter, path yang dirujuk, sintaks skrip, dan uji bawaannya, sedangkan tool dijalankan uji asapnya. Tool baru tanpa uji asap dilaporkan GAGAL |
 | `test_tools.py` | Tes kecil untuk logika skrip di atas |
 | `sync_rules.py` | Menjaga berkas aturan yang punya beberapa salinan dan terjemahan tetap sinkron, lengkap dengan mode `--check` untuk CI |
-| `session_context.py` | Merakit konteks awal satu sesi agent dari vault |
+| `session_context.py` | Merakit konteks awal satu sesi agent dari vault, untuk hook Claude Code, Hermes, dan Antigravity. Kontrak desain proyek ditaruh paling atas supaya tidak ikut terpotong |
+| `penjaga_desain.py` | Hook sebelum alat menulis, untuk Hermes dan Antigravity: menolak berkas tampilan baru dan `DESIGN.md` di proyek yang memakai vault, selama halaman referensi desain belum dibaca di sesi itu. Ini pengingat, jadi gagal memeriksa berarti lolos |
 | `pdf_parser.py` | Mengambil teks PDF ke Markdown |
 | `export_transcript.py` | Mengekspor transkrip percakapan sambil menyensor nilai secret yang ditemukan di `.env` dan berkas konfigurasi proyek |
 

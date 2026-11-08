@@ -307,6 +307,101 @@ class SessionContext(unittest.TestCase):
         self.assertIsNone(s.project_name(root, root))
         self.assertIsNone(s.project_name(root, os.path.join("D:" + os.sep, "KULIAH")))
 
+    def test_design_line(self):  # baris kontrak desain ditaruh paling atas, jadi tidak ikut terpotong (2026-11-08)
+        import json, subprocess, tempfile
+        import session_context as s
+        with tempfile.TemporaryDirectory() as t:
+            vault, root = os.path.join(t, "Vault"), os.path.join(t, "CODE")
+            for d in (os.path.join(vault, "Wiki", "system"), os.path.join(vault, "Wiki", "projects"), os.path.join(root, "Toko")):
+                os.makedirs(d)
+            with open(os.path.join(vault, "Wiki", "system", "Referensi Desain.md"), "w", encoding="utf-8") as f:
+                f.write("# RD\n\n## Kontrak desain proyek\n\n| Proyek | Berkas | Arah |\n|---|---|---|\n"
+                        "| [[Toko]] | `DESIGN.md` | Hangat |\n\n## Lain\n\n| [[Lain]] | x | y |\n")
+            with open(os.path.join(vault, "Wiki", "projects", "Toko.md"), "w", encoding="utf-8") as f:
+                f.write("# Toko\n" + "isi panjang\n" * 2000)
+            ctx = s.project_context(root, vault, "Toko")
+            self.assertLess(len(ctx), 10000)
+            self.assertLess(ctx.index("Hangat"), ctx.index("isi panjang"))
+            self.assertIsNone(s.design_line(vault, "Lain"))  # baris di luar tabel kontrak tidak dibaca
+            skrip = os.path.join(os.path.dirname(os.path.abspath(__file__)), "session_context.py")
+            def agy(folder):
+                masuk = json.dumps({"workspacePaths": [folder]}).encode("utf-8")
+                r = subprocess.run([sys.executable, "-B", skrip, "--format", "antigravity", "--projects-root", root, "--vault", vault],
+                                   input=masuk, capture_output=True)
+                return json.loads(r.stdout)
+            self.assertIn("Hangat", agy(os.path.join(root, "Toko"))["injectSteps"][0]["systemMessage"]["systemMessage"])
+            self.assertEqual(agy(t), {})  # di luar folder proyek: tanpa konteks, tapi tetap JSON
+
+class PenjagaDesain(unittest.TestCase):
+    def test_wajib_referensi(self):
+        import tempfile
+        import penjaga_desain as d
+        with tempfile.TemporaryDirectory() as root:
+            for p in ("Toko", "Rahasia"):
+                os.makedirs(os.path.join(root, p))
+            open(os.path.join(root, "Rahasia", ".no-vault"), "w").close()
+            open(os.path.join(root, "Toko", "index.html"), "w").close()
+            self.assertEqual(d.wajib_referensi(os.path.join(root, "Toko", "promo.html"), root), ("Toko", "berkas tampilan baru"))
+            self.assertIsNone(d.wajib_referensi(os.path.join(root, "Toko", "index.html"), root))  # mengubah berkas lama boleh
+            self.assertEqual(d.wajib_referensi(os.path.join(root, "Toko", "DESIGN.md"), root), ("Toko", "DESIGN.md"))
+            self.assertIsNone(d.wajib_referensi(os.path.join(root, "Toko", "app.py"), root))
+            self.assertIsNone(d.wajib_referensi(os.path.join(root, "Rahasia", "promo.html"), root))  # proyek .no-vault
+            self.assertIsNone(d.wajib_referensi(os.path.join(root, "lepas.html"), root))  # bukan milik proyek mana pun
+
+    def test_hook(self):  # dua format sungguhan: riwayat baca dari state.db tiruan (Hermes) dan transkrip tiruan (Antigravity)
+        import json, sqlite3, subprocess, tempfile
+        skrip = os.path.join(os.path.dirname(os.path.abspath(__file__)), "penjaga_desain.py")
+        with tempfile.TemporaryDirectory() as t:
+            root, vault, toko = os.path.join(t, "CODE"), os.path.join(t, "Vault"), os.path.join(t, "CODE", "Toko")
+            os.makedirs(toko)
+            db = sqlite3.connect(os.path.join(t, "state.db"))
+            db.execute("CREATE TABLE sessions (id TEXT, cwd TEXT)")
+            db.execute("CREATE TABLE messages (id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, tool_calls TEXT)")
+            db.execute("INSERT INTO sessions VALUES ('s1', ?)", (toko,))
+            db.commit()
+            transkrip = os.path.join(t, "transcript_full.jsonl")
+            open(transkrip, "w").close()
+            def jalan(fmt, payload):
+                r = subprocess.run([sys.executable, "-B", skrip, "--format", fmt, "--projects-root", root, "--vault", vault],
+                                   input=payload.encode("utf-8"), capture_output=True, env={**os.environ, "HERMES_HOME": t})
+                return r.returncode, r.stdout.decode("utf-8")
+            hermes = json.dumps({"hook_event_name": "pre_tool_call", "session_id": "s1", "cwd": t, "tool_name": "write_file",
+                                 "tool_input": {"path": "promo.html", "content": "<p>promo</p>"}})
+            agy = json.dumps({"toolCall": {"name": "write_file", "args": {"Path": os.path.join(toko, "promo.html")}},
+                              "workspacePaths": [toko], "transcriptPath": transkrip})
+            self.assertEqual(jalan("hermes", hermes)[0], 2)  # path relatif dinilai dari folder sesi di state.db
+            self.assertEqual(json.loads(jalan("antigravity", agy)[1])["decision"], "deny")
+            lampiran = os.path.join(vault, "Wiki", "system", "Lampiran Referensi Desain.md")  # bukan halaman utama
+            db.execute("INSERT INTO messages (session_id, role, tool_calls) VALUES ('s1', 'assistant', ?)",
+                       (json.dumps([{"function": {"name": "read_file", "arguments": json.dumps({"path": lampiran})}}]),))
+            db.commit()
+            with open(transkrip, "w", encoding="utf-8") as f:
+                f.write(json.dumps({"step_index": 1, "tool_calls": [{"name": "read_file", "args": {"Path": lampiran}}]}) + "\n")
+            self.assertEqual(jalan("hermes", hermes)[0], 2)
+            self.assertEqual(json.loads(jalan("antigravity", agy)[1])["decision"], "deny")
+            baca = os.path.join(vault, "Wiki", "system", "Referensi Desain.md")
+            db.execute("INSERT INTO messages (session_id, role, tool_calls) VALUES ('s1', 'assistant', ?)",
+                       (json.dumps([{"function": {"name": "read_file", "arguments": json.dumps({"path": baca})}}]),))
+            db.commit()
+            db.close()
+            with open(transkrip, "w", encoding="utf-8") as f:
+                f.write(json.dumps({"step_index": 1, "tool_calls": [{"name": "read_file", "args": {"Path": baca}}]}) + "\n")
+            self.assertEqual(jalan("hermes", hermes)[0], 0)
+            self.assertEqual(json.loads(jalan("antigravity", agy)[1])["decision"], "allow")
+            design = os.path.join(toko, "DESIGN.md")
+            open(design, "w").close()
+            hermes_md = lambda teks: json.dumps({"hook_event_name": "pre_tool_call", "session_id": "s1", "cwd": t, "tool_name": "patch",
+                                                 "tool_input": {"path": "DESIGN.md", "old_string": "[[Lama]]", "new_string": teks}})
+            agy_md = lambda teks: json.dumps({"toolCall": {"name": "edit_file", "args": {"Path": design, "Target": "[[Lama]]",
+                                                                                          "Replacement": teks}},
+                                              "workspacePaths": [toko], "transcriptPath": transkrip})
+            self.assertEqual(jalan("hermes", hermes_md("- [[Design Kit]]"))[0], 2)  # nama halaman vault tidak boleh masuk DESIGN.md
+            self.assertEqual(jalan("hermes", hermes_md("- majoo (majoo.id)"))[0], 0)  # teks lama yang dihapus tidak ikut dinilai
+            self.assertEqual(json.loads(jalan("antigravity", agy_md("- [[Design Kit]]"))[1])["decision"], "deny")
+            self.assertEqual(json.loads(jalan("antigravity", agy_md("- majoo (majoo.id)"))[1])["decision"], "allow")
+            self.assertEqual(json.loads(jalan("antigravity", "bukan json")[1])["decision"], "allow")  # gagal memeriksa berarti lolos
+            self.assertEqual(jalan("hermes", "bukan json")[0], 0)
+
 class ProjectActivity(unittest.TestCase):
     def test_stale_and_unpaged(self):
         import time, tempfile, vault_lint

@@ -6,6 +6,7 @@ import argparse
 import datetime
 
 LOW_PRIORITY = ("## Catatan kompilasi", "## Rujukan")   # bagian halaman proyek yang dilepas dulu kalau terlalu panjang
+CONTRACT_ROW = re.compile(r"^\|\s*\[\[([^\]|]+)(?:\|[^\]]*)?\]\]\s*\|(.*)\|$")   # | [[Proyek]] | berkas | arah |
 
 def compile_reminder(vault):
     """Pengingat Kompilasi yang dipaksa sistem (2026-10-16): hitung log sesi yang berubah sesudah hari kompilasi
@@ -44,6 +45,24 @@ def project_name(root, cwd):
         return None
     return rel.split(os.sep)[0]
 
+def design_line(vault, project):
+    """Baris proyek ini dari tabel "Kontrak desain proyek" di Wiki/system/Referensi Desain.md, atau None (2026-11-08).
+    Ditaruh paling atas konteks, karena halaman proyek yang panjang terpotong sebelum bagian desainnya."""
+    page = os.path.join(vault, "Wiki", "system", "Referensi Desain.md")
+    try:
+        with open(page, encoding="utf-8-sig") as f:
+            text = f.read()
+    except OSError:
+        return None
+    table = next((s for s in re.split(r"(?m)^## ", text) if s.startswith("Kontrak desain proyek")), "")
+    for line in table.splitlines():
+        m = CONTRACT_ROW.match(line.strip())
+        if m and m.group(1).strip() == project:
+            cells = [c.strip() for c in m.group(2).split("|") if c.strip()]
+            return (f"Kontrak desain proyek ini, dari tabel Kontrak desain proyek di {page}: {'. '.join(cells)}. "
+                    "Di setiap keputusan desain, buka halaman itu dulu dan mulai dari referensi proyek ini.")
+    return None
+
 def project_context(root, vault, project):
     """Mode proyek (D:\\CODE\\AGENTS.md): muat halaman proyek dari vault untuk folder kerja sesi ini."""
     folder = os.path.join(os.path.abspath(root), project)
@@ -52,22 +71,25 @@ def project_context(root, vault, project):
     vault = os.path.normpath(vault)
     page = os.path.join(vault, "Wiki", "projects", project + ".md")
     head = f"Konteks proyek `{project}` ({folder}), dimuat otomatis di awal sesi sesuai D:\\CODE\\AGENTS.md."
+    design = design_line(vault, project)
+    top = f"\n\n{design}" if design else ""
+    budget = 9200 - len(top)   # batas konteks hook 10.000 karakter, termasuk kepala dan baris desain
     try:
         with open(page, encoding="utf-8-sig") as f:
             text = f.read()
     except OSError:
         return (f"{head}\nBelum ada halaman proyek di vault ({page}). Bekerja seperti biasa; buat halaman itu di titik "
-                f"penting pertama, dan tulis log sesi ke {os.path.join(vault, 'Log', project)}.")
-    if len(text) > 9200:   # batas konteks hook 10.000 karakter, termasuk kepala di bawah
+                f"penting pertama, dan tulis log sesi ke {os.path.join(vault, 'Log', project)}.{top}")
+    if len(text) > budget:
         # Bagian yang paling jarang dibutuhkan di awal sesi dilepas dulu, baru sisanya dipotong (2026-10-16)
         parts = re.split(r"(?m)^(?=## )", text)
         dropped = [p.splitlines()[0][3:].strip() for p in parts if p.startswith(LOW_PRIORITY)]
         if dropped:
             text = "".join(p for p in parts if not p.startswith(LOW_PRIORITY)).rstrip()
             text += f"\n\n[Bagian tidak dimuat agar muat di konteks: {', '.join(dropped)}. Baca di {page}]"
-    if len(text) > 9200:
-        text = text[:9200] + f"\n\n[… dipotong; baca sisanya di {page}]"
-    return f"{head} Sumber: {page}. Log sesi ditulis ke folder log yang disebut di halaman ini.\n\n{text}"
+    if len(text) > budget:
+        text = text[:budget] + f"\n\n[… dipotong; baca sisanya di {page}]"
+    return f"{head} Sumber: {page}. Log sesi ditulis ke folder log yang disebut di halaman ini.{top}\n\n{text}"
 
 def main():
     parser = argparse.ArgumentParser(description="Hook awal sesi: muat hot.md (mode AI Agent) atau halaman proyek dari vault (mode proyek).")
@@ -75,33 +97,47 @@ def main():
     parser.add_argument("--projects-root", help="Folder induk proyek, mis. D:/CODE (mode proyek; folder kerja dibaca dari stdin hook)")
     parser.add_argument("--vault", help="Path vault memori (mode proyek)")
     parser.add_argument("--skip", action="append", default=[], help="Nama folder proyek yang dilewati, mis. 'AI Agent' (boleh diulang)")
-    parser.add_argument("--format", choices=("claude", "hermes"), default="claude",
-                        help="claude: SessionStart Claude Code. hermes: pre_llm_call Hermes, hanya di giliran pertama (2026-11-03)")
+    parser.add_argument("--format", choices=("claude", "hermes", "antigravity"), default="claude",
+                        help="claude: SessionStart Claude Code. hermes: pre_llm_call Hermes, hanya di giliran pertama (2026-11-03). "
+                             "antigravity: SessionStart Antigravity, konteks lewat injectSteps (2026-11-08)")
     args = parser.parse_args()
 
     payload = {}
     if args.projects_root or args.format == "hermes":
         try:
-            payload = json.load(sys.stdin)
+            payload = json.loads(sys.stdin.buffer.read().decode("utf-8"))   # bukan pengodean konsol Windows
         except ValueError:
             payload = {}
     if not isinstance(payload, dict):
         payload = {}
     if args.format == "hermes" and not (payload.get("extra") or {}).get("is_first_turn"):
         return   # pre_llm_call jalan di setiap giliran; konteks cukup sekali, di giliran pertama
-    if args.projects_root:
-        if not args.vault:
-            parser.error("--vault wajib di mode proyek")
-        project = project_name(args.projects_root, payload.get("cwd") or os.getcwd())
-        if project and project in args.skip:
-            context = hot_context(args.hot) if args.hot else None   # mis. AI Agent: halamannya hot.md (Aturan 1)
-        else:
-            context = project_context(args.projects_root, args.vault, project) if project else None
-    elif args.hot:
-        context = hot_context(args.hot)
-    else:
+    if args.projects_root and not args.vault:
+        parser.error("--vault wajib di mode proyek")
+    if not (args.projects_root or args.hot):
         parser.error("beri path hot.md atau --projects-root")
-    if context:
+    try:
+        if args.projects_root:
+            # Antigravity tidak mengirim cwd, hanya daftar folder workspace
+            cwd = payload.get("cwd") or next(iter(payload.get("workspacePaths") or []), None) or os.getcwd()
+            project = project_name(args.projects_root, cwd)
+            if project and project in args.skip:
+                context = hot_context(args.hot) if args.hot else None   # mis. AI Agent: halamannya hot.md (Aturan 1)
+            else:
+                context = project_context(args.projects_root, args.vault, project) if project else None
+        else:
+            context = hot_context(args.hot)
+    except Exception as e:
+        if args.format != "antigravity":
+            raise
+        # Hook Antigravity yang gagal ikut menggagalkan langkahnya, jadi konteks yang hilang lebih aman
+        print(f"session_context gagal ({type(e).__name__}: {e}), sesi jalan tanpa konteks.", file=sys.stderr)
+        context = None
+    if args.format == "antigravity":
+        # systemMessage harus objek. Keluaran ASCII supaya aman dibaca apa pun pengodean konsol, dan {} kalau tidak ada konteks
+        out = {"injectSteps": [{"systemMessage": {"systemMessage": context}}]} if context else {}
+        print(json.dumps(out))
+    elif context:
         sys.stdout.reconfigure(encoding="utf-8")
         out = ({"context": context} if args.format == "hermes"
                else {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": context}})
