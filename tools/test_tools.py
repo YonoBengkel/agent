@@ -647,6 +647,11 @@ class CekProsesSisa(unittest.TestCase):  # proses alat sisa uji dilaporkan hook 
         self.assertEqual(c.jenis(r"node D:\x\node_modules\next\dist\bin\next dev"), "next")
         self.assertIsNone(c.jenis(r'"C:\Program Files\Antigravity\Antigravity.exe" --type=renderer'))
         self.assertIsNone(c.jenis("notepad.exe catatan.txt"))
+        # hook ekspor transkrip yang jalan bersamaan, dengan argumen ke folder 9router (salah tangkap 2026-11-10)
+        self.assertIsNone(c.jenis(r'bash.exe -c "python \"D:/w/tools/export_transcript.py\" --secrets-from \"D:/w/9router/docker-compose.yml\""'))
+        self.assertIsNone(c.jenis(r'python D:\w\tools\vault_lint.py v --secrets-from "D:\w\9router\docker-compose.yml"'))
+        self.assertEqual(c.jenis(r'docker compose -f "D:\w\9router\docker-compose.yml" up'), "docker")
+        self.assertEqual(c.jenis(r"node D:\w\9router\server.js"), "9router")
 
     # Tabel proses tiruan: aplikasi (1) -> sesi ini (10) -> bash (11) -> hook (12); sesi lain (20) -> next dev (21)
     T = 1000.0

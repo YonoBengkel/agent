@@ -31,16 +31,21 @@ POLA = [
     ("vite", re.compile(r"\bvite(\.cmd|\.js)?\b", re.I)),
     ("uvicorn", re.compile(r"\buvicorn\b", re.I)),
     ("hermes", re.compile(r"\bhermes\b", re.I)),
-    ("9router", re.compile(r"9router", re.I)),
+    ("9router", re.compile(r"9router(?![\\/]+docker-compose\.ya?ml)", re.I)),   # bukan argumen --secrets-from milik hook
     ("agy", re.compile(r"(^|[\\/\s\"])agy(\.exe)?(\"|\s|$)", re.I)),
     ("docker", re.compile(r"docker desktop\.exe|com\.docker\.backend|\bdocker(\.exe)?\"?\s+(compose|run|start)\b", re.I)),
     ("http.server", re.compile(r"-m\s+http\.server\b|\bhttp-server\b", re.I)),
     ("playwright", re.compile(r"ms-playwright|playwright_\w*profile|--remote-debugging-pipe", re.I)),
 ]
 SESI = ("claude.exe", "claude")   # CLI sesi di aplikasi desktop Claude: leluhur terdekat bernama ini
+# Hook dan alat perawatan workspace ini berumur pendek dan bisa jalan bersamaan dengan hook Stop ini, misalnya
+# ekspor transkrip yang argumennya menyebut folder 9router (salah tangkap pertama, 2026-11-10)
+ABAIKAN = re.compile(r"tools[\\/]+(export_transcript|cek_proses_sisa|vault_guard|session_context|penjaga_desain|vault_lint|sync_rules)\.py", re.I)
 
 def jenis(cmd):
-    """Nama alat dari POLA yang cocok dengan baris perintah, atau None."""
+    """Nama alat dari POLA yang cocok dengan baris perintah, atau None. Hook workspace ini sendiri dilewati."""
+    if ABAIKAN.search(cmd or ""):
+        return None
     return next((nama for nama, pola in POLA if pola.search(cmd or "")), None)
 
 def ambil(sejak):
