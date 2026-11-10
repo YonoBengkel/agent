@@ -42,9 +42,16 @@ def backup_path(base, src):
     parts = [p if not p.startswith(".") else "dot-" + p[1:] for p in rest.replace("\\", "/").split("/") if p]
     return os.path.join(base, drive.rstrip(":") or "root", *parts)
 
+RAHASIA = re.compile(r"""(?im)^(\s*["']?[\w.-]*(?:key|token|secret|password|passwd)["']?\s*[:=]\s*)(\S.*)$""")
+
+def sensor(data):
+    """Nilai kunci yang namanya berakhiran key, token, secret, atau password diganti penanda, untuk konfigurasi
+    terpasang yang ikut dicadangkan ke vault (2026-11-10). Nama kunci seperti base_keymap dan key_env tidak kena."""
+    return RAHASIA.sub(lambda m: m.group(1) + "<disensor>", data.decode("utf-8", "replace")).encode("utf-8")
+
 def backup(reg, check):
-    """Cadangkan setiap sumber dan terjemahan di registry, plus folder tambahan, ke folder yang ikut tersinkron
-    (vault, lewat Obsidian Sync). Hanya berkas yang isinya berubah yang ditulis. Kembalikan jumlah masalah."""
+    """Cadangkan setiap sumber dan terjemahan di registry, plus folder tambahan, ke folder di vault, supaya ikut ke
+    mana pun vault dicadangkan. Hanya berkas yang isinya berubah yang ditulis. Kembalikan jumlah masalah."""
     b = reg.get("backup")
     if not b:
         return 0
@@ -52,7 +59,9 @@ def backup(reg, check):
     for folder in b.get("folders", []):
         files |= {os.path.join(folder, f) for f in os.listdir(folder)
                   if os.path.isfile(os.path.join(folder, f)) and f not in b.get("exclude", [])}
+    files |= set(b.get("files", []))   # konfigurasi terpasang tiap agent, misalnya hook (2026-11-10)
     files = {os.path.abspath(f) for f in files}   # path dari registry dan dari isi folder bisa beda pemisah
+    redact = {os.path.abspath(f) for f in b.get("redact", [])}
     print(f"# Cadangan aturan ke {b['dir']}")
     # Manifest: hash isi yang terakhir ditulis skrip ini per salinan. Salinan yang isinya sudah tidak sama dengan
     # manifest berarti disunting dari luar (mis. di Obsidian) dan tidak ditimpa. Tanggal ubah tidak dipakai, karena
@@ -66,6 +75,8 @@ def backup(reg, check):
         key = os.path.relpath(dst, b["dir"]).replace("\\", "/")
         try:
             data = open(src, "rb").read()
+            if src in redact:
+                data = sensor(data)
         except OSError as e:
             print(f"  [TIDAK TERJANGKAU] {src}: {e}")
             problems += 1

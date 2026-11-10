@@ -4,7 +4,8 @@ bawah --projects-root ditolak, selama halaman Referensi Desain belum dibaca di s
 Mengubah berkas tampilan yang sudah ada tetap boleh, supaya perbaikan kecil tidak tertahan. Tulisan ke DESIGN.md yang memuat
 tautan [[...]] ke halaman vault juga ditolak, karena DESIGN.md hanya menyebut referensi publik (uji Hermes 2026-11-08).
 
-Dua format hook:
+Tiga format hook:
+- claude: PreToolUse Claude Code (sejak 2026-11-10). Keluar 2 dengan alasan di stderr. Riwayat baca dari transcript_path.
 - hermes: pre_tool_call Hermes. Keluar 2 dengan alasan di stderr berarti ditolak. Riwayat baca dari state.db.
 - antigravity: PreToolUse Antigravity. Keputusan berupa JSON di stdout, selalu keluar 0, karena hook yang gagal ikut
   menggagalkan alatnya. Riwayat baca dari transkrip sesi (transcriptPath).
@@ -26,17 +27,19 @@ HALAMAN_UTUH = re.compile(r"(?:^|[\\/\"'])Referensi Desain\.md")
 WIKILINK = re.compile(r"\[\[[^\]\n]+\]\]")  # tautan ke halaman vault, yang tidak boleh masuk DESIGN.md (repo bisa publik)
 TAMPILAN = (".html", ".htm", ".css", ".scss", ".sass", ".less", ".jsx", ".tsx", ".vue", ".svelte", ".astro")
 TULIS = {"hermes": ("write_file", "patch"),
-         "antigravity": ("write_file", "edit_file", "write_to_file", "replace_file_content", "multi_replace_file_content")}
+         "antigravity": ("write_file", "edit_file", "write_to_file", "replace_file_content", "multi_replace_file_content"),
+         "claude": ("Write", "Edit", "MultiEdit")}
 BACA = {"hermes": ("read_file", "search_files", "terminal"),
-        "antigravity": ("read_file", "view_file", "grep_search", "run_command")}
+        "antigravity": ("read_file", "view_file", "grep_search", "run_command"),
+        "claude": ("Read", "Bash", "PowerShell")}
 
 
 def tujuan(fmt, hook):
     """Path penuh yang akan ditulis panggilan ini, atau [] kalau bukan alat tulis."""
-    if fmt == "hermes":
+    if fmt in ("hermes", "claude"):
         if hook.get("tool_name") not in TULIS[fmt]:
             return []
-        folder = g.session_cwd(hook)  # cwd di payload Hermes hanyalah folder gateway
+        folder = g.session_cwd(hook) if fmt == "hermes" else None  # cwd di payload Hermes hanyalah folder gateway
         return g.targets({**hook, "cwd": folder} if folder else hook)
     call = hook.get("toolCall") or {}
     if call.get("name") not in TULIS[fmt]:
@@ -85,7 +88,7 @@ def sudah_baca(fmt, hook):
                 if menyebut_halaman(fmt, f.get("name"), f.get("arguments") or ""):
                     return True
         return False
-    transkrip = hook.get("transcriptPath")
+    transkrip = hook.get("transcriptPath") or hook.get("transcript_path")
     if not transkrip or not os.path.exists(transkrip):
         return True
     with open(transkrip, encoding="utf-8", errors="replace") as f:
@@ -96,13 +99,21 @@ def sudah_baca(fmt, hook):
                 langkah = json.loads(baris)
             except ValueError:
                 continue
-            if any(menyebut_halaman(fmt, c.get("name"), c.get("args") or {}) for c in langkah.get("tool_calls") or []):
+            if fmt == "claude":  # baris transkrip Claude: blok tool_use di message.content
+                isi = (langkah.get("message") or {}).get("content")
+                panggilan = [(b.get("name"), b.get("input") or {}) for b in (isi if isinstance(isi, list) else [])
+                             if isinstance(b, dict) and b.get("type") == "tool_use"]
+            else:
+                panggilan = [(c.get("name"), c.get("args") or {}) for c in langkah.get("tool_calls") or []]
+            if any(menyebut_halaman(fmt, n, a) for n, a in panggilan):
                 return True
     return False
 
 
 def teks_baru(fmt, hook):
     """Teks yang akan ditulis. Teks lama (Target, old_string) dan baris hapus di patch V4A tidak ikut."""
+    if fmt == "claude":
+        return g.new_text(hook.get("tool_input") or {})  # content, new_string, dan edits MultiEdit
     if fmt == "hermes":
         ti = hook.get("tool_input") or {}
         tambah = [l for l in str(ti.get("patch") or "").splitlines() if l.startswith("+")]
@@ -134,7 +145,7 @@ def main():
     sys.stderr.reconfigure(encoding="utf-8")
     p = argparse.ArgumentParser(description="Hook sebelum alat menulis: tolak berkas tampilan baru dan DESIGN.md di proyek "
                                             "yang memakai vault, selama halaman Referensi Desain belum dibaca di sesi itu.")
-    p.add_argument("--format", choices=("hermes", "antigravity"), required=True)
+    p.add_argument("--format", choices=("hermes", "antigravity", "claude"), required=True)
     p.add_argument("--projects-root", required=True, help="Folder induk proyek, mis. D:/CODE")
     p.add_argument("--vault", required=True, help="Folder vault memori, tempat Wiki/system/Referensi Desain.md")
     try:

@@ -15,6 +15,8 @@ import vault_guard  # pola yang sama dengan hook penjaga, supaya cek ini jalan j
 LINK = re.compile(r"\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]")
 CODE = re.compile(r"```.*?```|`[^`\n]*`", re.S)   # Obsidian tidak menganggap [[...]] di dalam kode sebagai link
 CONTROL = {"hot", "index", "log", "log_id", "KONTEKS_PROYEK"}
+RIWAYAT = re.compile(r"(KONTEKS|log|log_id) \d{4}-\d{2}")   # berkas bulanan di Riwayat/ (2026-11-10), hub kronologis seperti induknya
+kontrol = lambda nama: nama in CONTROL or RIWAYAT.fullmatch(nama) is not None
 FRONTMATTER = re.compile(r"\A﻿?---\r?\n(.*?)\r?\n---", re.S)
 MANIFEST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rag_db", "manifest.json")   # ditulis rag_engine.py
 
@@ -84,11 +86,11 @@ def link_graph(text, canonical):
     graph = defaultdict(set)
     for p, t in text.items():
         me = os.path.splitext(os.path.basename(p))[0]
-        if me in CONTROL:
+        if kontrol(me):
             continue
         for target in LINK.findall(CODE.sub("", t)):
             target = canonical.get(page_name(target))
-            if target and target != me and target not in CONTROL:
+            if target and target != me and not kontrol(target):
                 graph[me].add(target)
                 graph[target].add(me)
     return graph
@@ -171,6 +173,17 @@ def stale_docs(projects_root, grace_days=14):
     return out
 
 LOG_NUMBER = re.compile(r"^(\d{3}) ")
+
+def lessons_unindexed(text):
+    """Nomor pelajaran di tabel `## Daftar` Pelajaran.md yang tidak disebut di `## Indeks per area` (sejak 2026-11-10),
+    supaya agent yang hanya membaca indeksnya tidak melewatkan pelajaran baru."""
+    parts = re.split(r"(?m)^## ", text)
+    index = next((p for p in parts if p.startswith("Indeks")), None)
+    table = next((p for p in parts if p.startswith("Daftar")), "")
+    if index is None:
+        return ["halaman belum punya bagian Indeks per area"]
+    named = set(re.findall(r"#(\d+)\b", index))
+    return [f"#{n}" for n in re.findall(r"(?m)^\| (\d+) \|", table) if n not in named]
 
 def log_numbering(paths, log_dir):
     """Aturan 4: log sesi bernama `NNN Judul.md`, nomor urut dibuat per folder. Kembalikan (tanpa nomor, nomor ganda)."""
@@ -297,6 +310,9 @@ def main():
     section("Log dengan nomor ganda dalam satu folder", [rel(p) for p in dup_numbers])
     section("Halaman wiki yatim (tidak ada link masuk dari file lain)", [rel(p) for p in orphans])
     section("Halaman wiki yang tidak tercantum di index.md", [rel(p) for p in not_indexed])
+    lessons = os.path.join(args.vault, "Wiki", "system", "Pelajaran.md")
+    if lessons in text:
+        section("Pelajaran yang belum masuk Indeks per area (Aturan 10)", lessons_unindexed(text[lessons]))
     section("Rujukan path yang tidak ada lagi (halaman wiki dan hot.md)", [f"{rel(p)}: `{s}`" for p, s in dead_paths])
     print("\nMetrik: halaman di `Wiki/concepts/` yang tidak punya link langsung (masuk atau keluar) dengan halaman `Wiki/system/` atau `Wiki/projects/`. Kaitan ke sistem kita yang tidak ditulis tidak bisa ditemukan RAG (Aturan 11, Wiki-to-System).")
     print("Saran per konsep: halaman system/projects dengan skor Adamic-Adar tertinggi atas tetangga bersama (log ikut sebagai penghubung, hub kontrol tidak). Hanya saran: tulis kaitannya kalau memang nyata, atau tulis bahwa tidak ada.")

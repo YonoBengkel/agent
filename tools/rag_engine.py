@@ -28,7 +28,7 @@ import chromadb
 MODEL = "intfloat/multilingual-e5-small"
 QUERY_PREFIX, PASSAGE_PREFIX = "query: ", "passage: "   # wajib untuk keluarga e5
 COLLECTION = "vault"
-EXCLUDE = ["log.md", "log_id.md"]
+EXCLUDE = ["log.md", "log_id.md", "log 20??-??.md", "log_id 20??-??.md"]   # log wiki dan arsip bulanannya di Riwayat/ (2026-11-10)
 VECTOR_WEIGHT = 2.0
 # Perluasan [[link]] (tetangga 5 hasil teratas sebagai daftar ketiga RRF) naik sedikit di set dev, tapi
 # menurunkan MRR di uji tertutup 0,88 → 0,68 (2026-10-13), jadi dimatikan. 0,5 = bobot yang pernah diuji.

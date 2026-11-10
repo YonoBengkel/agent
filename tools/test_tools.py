@@ -332,6 +332,34 @@ class SessionContext(unittest.TestCase):
             self.assertIn("Hangat", agy(os.path.join(root, "Toko"))["injectSteps"][0]["systemMessage"]["systemMessage"])
             self.assertEqual(agy(t), {})  # di luar folder proyek: tanpa konteks, tapi tetap JSON
 
+    def test_commit_warning(self):  # komit yang lebih baru dari catatan vault diberi satu baris peringatan (2026-11-10)
+        import subprocess, tempfile, time
+        import session_context as s
+        with tempfile.TemporaryDirectory() as t:
+            vault, repo = os.path.join(t, "Vault"), os.path.join(t, "CODE", "Toko")
+            os.makedirs(os.path.join(vault, "Wiki", "projects"))
+            os.makedirs(repo)
+            page = os.path.join(vault, "Wiki", "projects", "Toko.md")
+            with open(page, "w", encoding="utf-8") as f:
+                f.write("# Toko\n\nisi\n")
+            self.assertEqual(s.commit_warning(vault, repo, "Toko", page, "isi"), "")   # belum repo git
+            git = ["git", "-C", repo, "-c", "user.name=uji", "-c", "user.email=uji@contoh.test"]
+            subprocess.run(git[:3] + ["init", "-q"], check=True)
+            with open(os.path.join(repo, "a.txt"), "w") as f:
+                f.write("a")
+            subprocess.run(git + ["add", "a.txt"], check=True)
+            subprocess.run(git + ["commit", "-q", "-m", "fitur keranjang"], check=True)
+            lama = time.time() - 3 * 86400
+            os.utime(page, (lama, lama))
+            w = s.commit_warning(vault, repo, "Toko", page, "isi")
+            self.assertIn("1 komit", w)
+            self.assertIn("fitur keranjang", w)
+            log = os.path.join(vault, "Log", "Toko")
+            os.makedirs(log)
+            with open(os.path.join(log, "001 sesi.md"), "w", encoding="utf-8") as f:
+                f.write("# sesi\n")
+            self.assertEqual(s.commit_warning(vault, repo, "Toko", page, "isi"), "")   # log hari ini menghitung sebagai catatan
+
 class PenjagaDesain(unittest.TestCase):
     def test_wajib_referensi(self):
         import tempfile
@@ -402,6 +430,118 @@ class PenjagaDesain(unittest.TestCase):
             self.assertEqual(json.loads(jalan("antigravity", "bukan json")[1])["decision"], "allow")  # gagal memeriksa berarti lolos
             self.assertEqual(jalan("hermes", "bukan json")[0], 0)
 
+    def test_hook_claude(self):  # format claude: riwayat baca dari transkrip Claude (blok tool_use Read)
+        import json, subprocess, tempfile
+        skrip = os.path.join(os.path.dirname(os.path.abspath(__file__)), "penjaga_desain.py")
+        with tempfile.TemporaryDirectory() as t:
+            root, vault, toko = os.path.join(t, "CODE"), os.path.join(t, "Vault"), os.path.join(t, "CODE", "Toko")
+            os.makedirs(toko)
+            transkrip = os.path.join(t, "sesi.jsonl")
+            def baris(path):
+                return json.dumps({"type": "assistant", "message": {"content": [
+                    {"type": "tool_use", "name": "Read", "input": {"file_path": path}}]}}) + "\n"
+            def jalan(tool, **ti):
+                masuk = json.dumps({"hook_event_name": "PreToolUse", "cwd": toko, "transcript_path": transkrip,
+                                    "tool_name": tool, "tool_input": ti})
+                return subprocess.run([sys.executable, "-B", skrip, "--format", "claude", "--projects-root", root, "--vault", vault],
+                                      input=masuk.encode("utf-8"), capture_output=True).returncode
+            with open(transkrip, "w", encoding="utf-8") as f:
+                f.write(baris(os.path.join(vault, "Wiki", "system", "Lampiran Referensi Desain.md")))
+            self.assertEqual(jalan("Write", file_path=os.path.join(toko, "promo.html"), content="<p>x</p>"), 2)
+            with open(transkrip, "a", encoding="utf-8") as f:
+                f.write(baris(os.path.join(vault, "Wiki", "system", "Referensi Desain.md")))
+            self.assertEqual(jalan("Write", file_path="promo.html", content="<p>x</p>"), 0)  # path relatif dari cwd
+            self.assertEqual(jalan("Edit", file_path=os.path.join(toko, "DESIGN.md"), old_string="a", new_string="- [[Design Kit]]"), 2)
+            self.assertEqual(jalan("MultiEdit", file_path=os.path.join(toko, "DESIGN.md"),
+                                   edits=[{"old_string": "a", "new_string": "- majoo (majoo.id)"}]), 0)
+
+class EksporAgenLain(unittest.TestCase):
+    def test_antigravity_dan_hermes(self):  # arsip transkrip agent selain Claude (2026-11-10)
+        import json, sqlite3, subprocess, tempfile, pathlib
+        skrip = os.path.join(os.path.dirname(os.path.abspath(__file__)), "export_transcript.py")
+        with tempfile.TemporaryDirectory() as t:
+            root, out, app, cli = os.path.join(t, "CODE"), os.path.join(t, "arsip"), os.path.join(t, "agy"), os.path.join(t, "agy-cli")
+            toko, rahasia = os.path.join(root, "Toko"), os.path.join(root, "Rahasia")
+            for d in (toko, rahasia, app, cli):
+                os.makedirs(d)
+            open(os.path.join(rahasia, ".no-vault"), "w").close()
+            # App mencatat c1, c2, c3; CLI mencatat c1 yang sama dengan transkrip lebih panjang, yang harus dipilih.
+            for folder, isi in ((app, (("c1", toko), ("c2", rahasia), ("c3", os.path.join(t, "KULIAH")))), (cli, (("c1", toko),))):
+                db = sqlite3.connect(os.path.join(folder, "conversation_summaries.db"))
+                db.execute("CREATE TABLE conversation_summaries (conversation_id TEXT, title TEXT, workspace_uris TEXT, nesting_depth INTEGER)")
+                for cid, ws in isi:
+                    db.execute("INSERT INTO conversation_summaries VALUES (?, ?, ?, 0)", (cid, "Judul " + cid, json.dumps([pathlib.Path(ws).as_uri()])))
+                    logs = os.path.join(folder, "brain", cid, ".system_generated", "logs")
+                    os.makedirs(logs)
+                    with open(os.path.join(logs, "transcript_full.jsonl"), "w", encoding="utf-8") as f:
+                        f.write(json.dumps({"type": "USER_INPUT", "created_at": "2026-11-10T01:00:00Z",
+                                            "content": "<USER_REQUEST>halo API_KEY=rahasia123</USER_REQUEST><ADDITIONAL_METADATA>jam</ADDITIONAL_METADATA>"}) + "\n")
+                        f.write(json.dumps({"type": "PLANNER_RESPONSE", "content": "jawab", "tool_calls": [{"name": "read_file", "args": {"Path": "a"}}]}) + "\n")
+                        if folder == cli:
+                            f.write(json.dumps({"type": "PLANNER_RESPONSE", "content": "lanjutan dari CLI"}) + "\n")
+                db.commit()
+                db.close()
+            sdb = os.path.join(t, "state.db")
+            db = sqlite3.connect(sdb)
+            db.execute("CREATE TABLE sessions (id TEXT, title TEXT, cwd TEXT, started_at REAL, parent_session_id TEXT)")
+            db.execute("CREATE TABLE messages (id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, content TEXT, tool_calls TEXT)")
+            db.execute("INSERT INTO sessions VALUES ('h1', 'Sesi', ?, 1794200000, NULL)", (toko,))
+            db.execute("INSERT INTO messages (session_id, role, content) VALUES ('h1', 'user', 'tugas')")
+            db.commit()
+            db.close()
+            def jalan(*a):
+                return subprocess.run([sys.executable, "-B", skrip, "--out", out, "--projects-root", root, *a], capture_output=True, text=True).returncode
+            self.assertEqual(jalan("--format", "antigravity", "--app-dir", app, "--app-dir", cli), 0)
+            self.assertEqual(jalan("--format", "hermes", "--state-db", sdb), 0)
+            self.assertEqual(sorted(os.listdir(out)), ["Toko"])  # .no-vault dan folder di luar root dilewati
+            berkas = os.listdir(os.path.join(out, "Toko"))
+            self.assertEqual(len(berkas), 2)
+            isi = open(os.path.join(out, "Toko", next(b for b in berkas if "Antigravity" in b)), encoding="utf-8").read()
+            self.assertNotIn("rahasia123", isi)
+            self.assertNotIn("ADDITIONAL_METADATA", isi)
+            self.assertIn("lanjutan dari CLI", isi)   # transkrip terlengkap yang dipakai, satu berkas per percakapan
+
+class UjiAgen(unittest.TestCase):  # canary lintas agent dengan skor N dari M (2026-11-10)
+    def test_baca_agy_dan_nilai(self):
+        import json, uji_agen as u
+        def langkah(nama, par, state="DONE", galat=""):
+            info = {"parameters": par, **({"error": {"message": galat}} if galat else {})}
+            return json.dumps({"step_update": {"step_type": "tool", "state": state, "tool_name": nama, "tool_info": info}})
+        vault = "D:/Vault Uji"
+        teks = "\n".join([
+            langkah("view_file", {"AbsolutePath": "D:\\Vault Uji\\Wiki\\system\\Lampiran Referensi Desain.md"}),  # lampiran tidak dihitung
+            langkah("write_to_file", {"TargetFile": "D:\\CODE\\uji-agen-a\\promo.html"}, "ERROR", "denied by pre-tool hook"),
+            langkah("view_file", {"AbsolutePath": "D:\\Vault Uji\\Wiki\\system\\Referensi Desain.md"}),
+            langkah("write_to_file", {"TargetFile": "D:\\CODE\\uji-agen-a\\promo.html"}),
+            "bukan json",
+            json.dumps({"event": "result", "result": {"usage": {"total_tokens": 1234}, "response": "selesai"}})])
+        alat, ringkas = u.baca_agy(teks)
+        self.assertEqual([n for n, _ in alat], ["view_file", "write_to_file (ditolak)", "view_file", "write_to_file"])
+        self.assertEqual(ringkas["token"], 1234)
+        n = u.nilai(alat, "agy", vault, u.DESIGN)
+        self.assertTrue(n["ref_dibaca"] and n["promo_dibuat"])
+        self.assertFalse(n["desain_sebelum_ref"])   # tulisan yang ditolak penjaga tidak dihitung sebagai keputusan
+        self.assertEqual((n["ditolak_penjaga"], n["akses_vault"]), (1, 2))
+        self.assertFalse(n["design_md_catat_ref"])   # templat bawaan belum mencatat apa pun
+        self.assertTrue(u.catat_ref(u.DESIGN.replace("- Belum ada.", "- Situs contoh, https://contoh.test")))
+        cepat = u.nilai([("write_to_file", "D:/CODE/uji-agen-a/promo.html"), ("view_file", vault + "/Wiki/system/Referensi Desain.md")], "agy", vault, "")
+        self.assertTrue(cepat["desain_sebelum_ref"])
+
+    def test_sah_dan_skor(self):
+        import uji_agen as u
+        self.assertFalse(u.sah([("run_command (galat)", "dir")], False))
+        self.assertFalse(u.sah([], False))
+        self.assertFalse(u.sah([("read_file", "a"), ("run_command (galat)", "dir vault")], False))   # berhenti di perintah yang ditolak
+        self.assertTrue(u.sah([("write_to_file", "promo.html"), ("run_command (galat)", "dir")], True))   # tugas sudah selesai
+        self.assertTrue(u.sah([("view_file", "a"), ("write_to_file", "b")], False))
+        dasar = {"agen": "agy", "promo_dibuat": True, "ref_dibaca": True, "desain_sebelum_ref": False, "design_md_catat_ref": False, "akses_vault": 0}
+        rows = [{**dasar, "repo": "a", "sah": True}, {**dasar, "repo": "a", "sah": True, "desain_sebelum_ref": True},
+                {**dasar, "repo": "a", "sah": False}, {**dasar, "repo": "b", "sah": True, "akses_vault": 2}]
+        hasil = u.skor(rows)
+        self.assertIn("agy repo a: 2 run sah, 1 tidak sah", hasil)
+        self.assertIn("  Referensi Desain dibaca sebelum keputusan desain: 1 dari 2", hasil)
+        self.assertIn("  vault tidak disentuh (.no-vault): 0 dari 1", hasil)
+
 class ProjectActivity(unittest.TestCase):
     def test_stale_and_unpaged(self):
         import time, tempfile, vault_lint
@@ -449,6 +589,14 @@ class ProjectDocs(unittest.TestCase):
             self.assertEqual([(n, doc) for n, doc, _, _ in vault_lint.stale_docs(d)], [("A", "ARCHITECTURE.md")])
 
 class RuleBackup(unittest.TestCase):
+    def test_sensor(self):  # konfigurasi terpasang dicadangkan ke vault tanpa nilai rahasia (2026-11-10)
+        import sync_rules
+        hasil = sync_rules.sensor(b'  api_key: sk-abc\n  key_env: NAMA\n"base_keymap": "VSCode",\n"OPENAI_API_KEY": "x"\n').decode()
+        self.assertNotIn("sk-abc", hasil)
+        self.assertNotIn('"x"', hasil)
+        self.assertIn("key_env: NAMA", hasil)
+        self.assertIn('"base_keymap": "VSCode"', hasil)
+
     def test_backup_and_check(self):
         import tempfile, sync_rules
         with tempfile.TemporaryDirectory() as d:
@@ -489,6 +637,96 @@ class LogNumbering(unittest.TestCase):
         missing, dup = vault_lint.log_numbering(paths, log)
         self.assertEqual([os.path.basename(p) for p in missing], ["tanpa nomor.md"])
         self.assertEqual([os.path.basename(p) for p in dup], ["002 kembar.md"])
+
+class CekProsesSisa(unittest.TestCase):  # proses alat sisa uji dilaporkan hook Stop, sekali per proses (2026-11-10)
+    def test_jenis(self):
+        import cek_proses_sisa as c
+        self.assertEqual(c.jenis(r"node D:\x\node_modules\vite\bin\vite.js --port 5173"), "vite")
+        self.assertEqual(c.jenis("python -m http.server 8000"), "http.server")
+        self.assertEqual(c.jenis(r'"C:\bin\agy.exe" -p tugas'), "agy")
+        self.assertEqual(c.jenis(r"node D:\x\node_modules\next\dist\bin\next dev"), "next")
+        self.assertIsNone(c.jenis(r'"C:\Program Files\Antigravity\Antigravity.exe" --type=renderer'))
+        self.assertIsNone(c.jenis("notepad.exe catatan.txt"))
+
+    # Tabel proses tiruan: aplikasi (1) -> sesi ini (10) -> bash (11) -> hook (12); sesi lain (20) -> next dev (21)
+    T = 1000.0
+    PROSES = [
+        {"i": 1, "o": 0, "n": "claude.exe", "t": 100, "c": "app"},
+        {"i": 10, "o": 1, "n": "claude.exe", "t": 200, "c": "cli sesi"},
+        {"i": 11, "o": 10, "n": "bash.exe", "t": 1100, "c": "bash"},
+        {"i": 12, "o": 11, "n": "python.exe", "t": 1200, "c": "python cek_proses_sisa.py --hook"},
+        {"i": 13, "o": 10, "n": "node.exe", "t": 1300, "c": r"node D:\w\node_modules\vite\bin\vite.js"},
+        {"i": 14, "o": 99, "n": "node.exe", "t": 1400, "c": "node next dev"},          # induk 99 sudah mati
+        {"i": 20, "o": 1, "n": "claude.exe", "t": 300, "c": "cli sesi lain"},
+        {"i": 21, "o": 20, "n": "node.exe", "t": 1500, "c": "node next dev"},          # milik sesi lain
+        {"i": 22, "o": 10, "n": "python.exe", "t": 900, "c": "python -m http.server"},  # lebih tua dari awal sesi
+        {"i": 23, "o": 24, "n": "python.exe", "t": 1600, "c": "python -m uvicorn app:x"},
+        {"i": 24, "o": 10, "n": "cmd.exe", "t": 1700, "c": "cmd"},                     # PID induk dipakai ulang sesudahnya
+    ]
+
+    def test_cari_asal(self):
+        import cek_proses_sisa as c
+        h = {x["pid"]: x for x in c.cari(self.PROSES, [{"p": 5173, "i": 13}], self.T, 12)}
+        self.assertEqual(sorted(h), [13, 14, 21, 23])
+        self.assertEqual((h[13]["asal"], h[13]["port"]), ("sesi ini", [5173]))
+        self.assertEqual(h[14]["asal"], "yatim")
+        self.assertEqual(h[21]["asal"], "lain")
+        self.assertEqual(h[23]["asal"], "yatim")
+
+    def test_hook_sekali(self):
+        import tempfile
+        import cek_proses_sisa as c
+        with tempfile.TemporaryDirectory() as t:
+            tr = os.path.join(t, "sesi.jsonl")
+            with open(tr, "w") as f:
+                f.write("{}\n")
+            ambil = lambda sejak: self.PROSES
+            dengar = lambda: [{"p": 5173, "i": 13}]
+            payload = {"transcript_path": tr, "session_id": "uji"}
+            asli = c.cari
+            c.cari = lambda p, d, sejak, diri: asli(p, d, self.T, diri)   # waktu transkrip diganti T tabel tiruan
+            try:
+                out = c.hook(payload, os.path.join(t, "state"), ambil, dengar, diri=12)
+                self.assertEqual(out["decision"], "block")
+                self.assertIn("vite PID 13 port 5173", out["reason"])
+                self.assertNotIn("PID 21", out["reason"])   # proses sesi lain tidak dilaporkan
+                self.assertIsNone(c.hook(payload, os.path.join(t, "state"), ambil, dengar, diri=12))   # tidak diulang
+                lagi = c.hook(dict(payload, session_id="uji2", stop_hook_active=True), os.path.join(t, "state"), ambil, dengar, diri=12)
+                self.assertIn("systemMessage", lagi)   # sudah dilanjutkan hook Stop: hanya pesan ke pengguna
+            finally:
+                c.cari = asli
+
+class LessonIndex(unittest.TestCase):  # pelajaran baru wajib masuk Indeks per area (2026-11-10)
+    def test_unindexed(self):
+        import vault_lint
+        page = ("# Pelajaran\n\n## Indeks per area\n\n- **Vault:** #1 a, #3 c\n\n## Daftar\n\n| # | Area |\n|---|---|\n"
+                "| 1 | x |\n| 2 | y |\n| 3 | z |\n| 13 | w |\n")
+        self.assertEqual(vault_lint.lessons_unindexed(page), ["#2", "#13"])   # #1 dan #3 tidak dihitung menyebut #13
+        self.assertEqual(vault_lint.lessons_unindexed("# P\n\n## Daftar\n\n| 1 | x |\n"), ["halaman belum punya bagian Indeks per area"])
+
+class PutarLog(unittest.TestCase):  # log wiki diputar per bulan (2026-11-10)
+    def test_putar_dan_ulang(self):
+        import tempfile
+        import putar_log
+        with tempfile.TemporaryDirectory() as v:
+            os.makedirs(os.path.join(v, "Wiki"))
+            log = os.path.join(v, "Wiki", "log.md")
+            with open(log, "w", encoding="utf-8", newline="") as f:
+                f.write("# Wiki Log\n\n> kepala\n\nEarlier, by `tools/putar_log.py`: [[log 2026-01]].\n\n---\n\n## [2026-09-30] ingest | A\nisi a\n\n"
+                        "## [2026-10-02] compile | B\nisi b\n\n## [2026-11-01] lint | C\nisi c\n")
+            self.assertEqual(putar_log.putar(v, "log", "2026-11", tulis=False), {"2026-09": 1, "2026-10": 1})
+            self.assertIn("isi a", open(log, encoding="utf-8").read())   # --cek tidak menulis
+            putar_log.putar(v, "log", "2026-11")
+            putar_log.putar(v, "log", "2026-11")   # jalan kedua tidak menggandakan apa pun
+            sisa = open(log, encoding="utf-8").read()
+            self.assertTrue(sisa.startswith("# Wiki Log\n\n> kepala"))
+            self.assertIn("`tools/putar_log.py`: [[log 2026-09]], [[log 2026-10]].\n", sisa)   # daftar riwayat di kepala ikut segar
+            self.assertNotIn("isi b", sisa)
+            self.assertIn("## [2026-11-01] lint | C", sisa)
+            okt = open(os.path.join(v, "Riwayat", "log 2026-10.md"), encoding="utf-8").read()
+            self.assertEqual(okt.count("## [2026-10-02] compile | B"), 1)
+            self.assertIn("[[log]]", okt)
+            self.assertTrue(os.path.exists(os.path.join(v, "Riwayat", "log 2026-09.md")))
 
 if __name__ == "__main__":
     unittest.main()

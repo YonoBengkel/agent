@@ -4,18 +4,27 @@ import sys
 import json
 import argparse
 import datetime
+import subprocess
 
 LOW_PRIORITY = ("## Catatan kompilasi", "## Rujukan")   # bagian halaman proyek yang dilepas dulu kalau terlalu panjang
 CONTRACT_ROW = re.compile(r"^\|\s*\[\[([^\]|]+)(?:\|[^\]]*)?\]\]\s*\|(.*)\|$")   # | [[Proyek]] | berkas | arah |
 
 def compile_reminder(vault):
     """Pengingat Kompilasi yang dipaksa sistem (2026-10-16): hitung log sesi yang berubah sesudah hari kompilasi
-    terakhir di Wiki/log.md. Log yang berubah di hari kompilasi itu sendiri tidak dihitung, jadi angkanya batas bawah."""
-    try:
-        with open(os.path.join(vault, "Wiki", "log.md"), encoding="utf-8-sig") as f:
-            dates = re.findall(r"(?m)^## \[(\d{4}-\d{2}-\d{2})\] compile\b", f.read())
-    except OSError:
-        return ""
+    terakhir di Wiki/log.md. Log yang berubah di hari kompilasi itu sendiri tidak dihitung, jadi angkanya batas bawah.
+    Sejak 2026-11-10 log.md hanya memuat bulan berjalan, jadi kalau di sana belum ada kompilasi, bulan-bulan
+    sebelumnya dicari di Riwayat/log <YYYY-MM>.md (tools/putar_log.py), dari yang terbaru."""
+    riwayat = os.path.join(vault, "Riwayat")
+    lama = sorted((f for f in (os.listdir(riwayat) if os.path.isdir(riwayat) else []) if re.fullmatch(r"log \d{4}-\d{2}\.md", f)), reverse=True)
+    dates = []
+    for p in [os.path.join(vault, "Wiki", "log.md")] + [os.path.join(riwayat, f) for f in lama]:
+        try:
+            with open(p, encoding="utf-8-sig") as f:
+                dates = re.findall(r"(?m)^## \[(\d{4}-\d{2}-\d{2})\] compile\b", f.read())
+        except OSError:
+            continue
+        if dates:
+            break
     if not dates:
         return ""
     last = max(dates)
@@ -63,6 +72,29 @@ def design_line(vault, project):
                     "Di setiap keputusan desain, buka halaman itu dulu dan mulai dari referensi proyek ini.")
     return None
 
+def commit_warning(vault, folder, project, page, text):
+    """Pelajaran #25 (2026-11-10): satu baris peringatan kalau repo proyek punya komit di hari yang lebih baru daripada
+    catatan vault terakhirnya (halaman proyek atau log di folder lognya), dibandingkan per hari seperti
+    vault_lint.project_activity. Kosong kalau bukan repo git, git gagal atau lambat, atau tidak ada komit baru."""
+    if not os.path.exists(os.path.join(folder, ".git")):
+        return ""
+    try:
+        import vault_lint as vl   # aturan folder log yang sama dengan lint
+        m = vl.LOG_FOLDER.search(text)
+        logs = [m.group(1)] if m else [f"Log/{project}"]
+        noted = max([t for t in (vl.latest_mtime(os.path.join(vault, l), ".md") for l in logs) if t] + [os.path.getmtime(page)])
+        day = datetime.date.fromtimestamp(noted)
+        r = subprocess.run(["git", "-C", folder, "log", f"--since={day + datetime.timedelta(days=1)} 00:00:00",
+                            "--format=%cs %s", "-n", "21"], capture_output=True, timeout=5)
+        rows = [l for l in r.stdout.decode("utf-8", "replace").splitlines() if l.strip()] if r.returncode == 0 else []
+    except Exception:
+        return ""
+    if not rows:
+        return ""
+    n = "lebih dari 20" if len(rows) > 20 else str(len(rows))
+    return (f"[Peringatan komit] Repo ini punya {n} komit sesudah catatan vault terakhirnya ({day}), yang terbaru: "
+            f"{rows[0][:120]}. Lihat `git log` sejak tanggal itu, lalu catat status atau keputusan baru di halaman proyek (Pelajaran #25).")
+
 def project_context(root, vault, project):
     """Mode proyek (D:\\CODE\\AGENTS.md): muat halaman proyek dari vault untuk folder kerja sesi ini."""
     folder = os.path.join(os.path.abspath(root), project)
@@ -73,13 +105,15 @@ def project_context(root, vault, project):
     head = f"Konteks proyek `{project}` ({folder}), dimuat otomatis di awal sesi sesuai D:\\CODE\\AGENTS.md."
     design = design_line(vault, project)
     top = f"\n\n{design}" if design else ""
-    budget = 9200 - len(top)   # batas konteks hook 10.000 karakter, termasuk kepala dan baris desain
     try:
         with open(page, encoding="utf-8-sig") as f:
             text = f.read()
     except OSError:
         return (f"{head}\nBelum ada halaman proyek di vault ({page}). Bekerja seperti biasa; buat halaman itu di titik "
                 f"penting pertama, dan tulis log sesi ke {os.path.join(vault, 'Log', project)}.{top}")
+    warning = commit_warning(vault, folder, project, page, text)
+    top += f"\n\n{warning}" if warning else ""
+    budget = 9200 - len(top)   # batas konteks hook 10.000 karakter, termasuk kepala, baris desain, dan peringatan komit
     if len(text) > budget:
         # Bagian yang paling jarang dibutuhkan di awal sesi dilepas dulu, baru sisanya dipotong (2026-10-16)
         parts = re.split(r"(?m)^(?=## )", text)

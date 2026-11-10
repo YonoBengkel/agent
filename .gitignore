@@ -20,5 +20,8 @@
 !/tools/oper_kerja.py
 !/tools/uji_peta.py
 !/tools/penjaga_desain.py
+!/tools/uji_agen.py
+!/tools/cek_proses_sisa.py
+!/tools/putar_log.py
 !/tools/test_tools.py
 !/tools/requirements/

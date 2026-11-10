@@ -163,6 +163,15 @@ def uji_tool(nama, vault, berat):
         elif nama == "export_transcript.py":
             k, o = jalan([py, "-B", "tools/export_transcript.py", "--help"])
             ok, pesan = k == 0, "hanya --help. Logika sensornya diuji test_tools.py"
+        elif nama == "uji_agen.py":
+            k, o = jalan([py, "-B", "tools/uji_agen.py", "--help"])
+            ok, pesan = k == 0 and "skor" in o, "--help. Penilaiannya diuji test_tools.py, run agent sungguhan tidak dijalankan di sini"
+        elif nama == "cek_proses_sisa.py":
+            k, o = jalan([py, "-B", "tools/cek_proses_sisa.py", "--sejak", "10m"])
+            ok, pesan = k == 0 and "proses alat sejak 10m" in o, "daftar proses sungguhan 10 menit terakhir. Logika hook-nya diuji test_tools.py"
+        elif nama == "putar_log.py":
+            k, o = jalan([py, "-B", "tools/putar_log.py", "--vault", vault, "--cek"])
+            ok, pesan = k in (0, 1) and "entri" in o, "--cek pada vault, tanpa menulis"
         elif nama == "medusa":
             k, o = jalan([AKAR / "tools" / "medusa-venv" / "Scripts" / "medusa.exe", "--version"])
             ok, pesan = k == 0 and "MEDUSA" in o, "hanya --version. Pindaian penuh berat untuk RAM mesin ini"
