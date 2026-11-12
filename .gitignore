@@ -23,5 +23,6 @@
 !/tools/uji_agen.py
 !/tools/cek_proses_sisa.py
 !/tools/putar_log.py
+!/tools/cadangkan_vault.py
 !/tools/test_tools.py
 !/tools/requirements/

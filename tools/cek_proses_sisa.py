@@ -154,10 +154,17 @@ def isi_port(hasil, dengar):
         h["port"] = sorted({x["p"] for x in dengar if x["i"] == h["pid"]})
     return hasil
 
+RAHASIA = re.compile(r"(?i)((?:--?|\b)[\w.-]*(?:token|secret|password|passwd|api[_-]?key|auth)[\w.-]*[=:\s]+)(\"[^\"]*\"|\S+)")
+
+def sensor(cmd):
+    """Baris perintah tanpa nilai argumen yang mirip rahasia, misalnya `--csrf_token=...` milik hub Antigravity
+    (ketemu 2026-11-11). Keluaran alat ini masuk ke konteks agent dan transkrip, jadi nilainya tidak boleh ikut."""
+    return RAHASIA.sub(lambda m: m.group(1) + "<disensor>", cmd or "")
+
 def baris(h):
     port = f" port {','.join(map(str, h['port']))}" if h["port"] else ""
     jam = time.strftime("%H:%M", time.localtime(h["dibuat"]))
-    return f"{h['alat']} PID {h['pid']}{port} sejak {jam} ({h['asal']}): {h['cmd'][:100]}"
+    return f"{h['alat']} PID {h['pid']}{port} sejak {jam} ({h['asal']}): {sensor(h['cmd'])[:100]}"
 
 def hook(payload, state_dir, ambil_data=ambil, ambil_dengar=ambil_port, diri=None):
     """Hook Stop Claude Code. Kembalikan dict keluaran hook, atau None kalau tidak ada yang perlu dilaporkan."""

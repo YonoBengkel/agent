@@ -7,6 +7,7 @@ import datetime
 import subprocess
 
 LOW_PRIORITY = ("## Catatan kompilasi", "## Rujukan")   # bagian halaman proyek yang dilepas dulu kalau terlalu panjang
+KATA_IZIN = re.compile(r"(?i)\bpakai konteks\b")   # kata izin pengguna untuk mengirim isi vault ke model Hermes (2026-11-11)
 CONTRACT_ROW = re.compile(r"^\|\s*\[\[([^\]|]+)(?:\|[^\]]*)?\]\]\s*\|(.*)\|$")   # | [[Proyek]] | berkas | arah |
 
 def compile_reminder(vault):
@@ -125,6 +126,33 @@ def project_context(root, vault, project):
         text = text[:budget] + f"\n\n[… dipotong; baca sisanya di {page}]"
     return f"{head} Sumber: {page}. Log sesi ditulis ke folder log yang disebut di halaman ini.{top}\n\n{text}"
 
+def hermes_context(args, payload):
+    """Hermes, sejak 2026-11-11 atas persetujuan pengguna: isi vault tidak dikirim otomatis, karena sesi Hermes memakai
+    model gratis yang isinya bisa dibaca peninjau manusia (keputusan 31). Giliran pertama hanya mendapat satu kalimat
+    pemberitahuan tanpa isi vault. Halaman proyek, atau hot.md di folder yang di-skip (AI Agent), baru dikirim di
+    giliran yang pesannya memuat kata izin `pakai konteks`. Folder sesi dibaca dari state.db, karena semua sesi jalan
+    di satu gateway dan cwd di payload hanya folder gateway."""
+    extra = payload.get("extra") or {}
+    pesan = extra.get("user_message")
+    teks = pesan if isinstance(pesan, str) else json.dumps(pesan, ensure_ascii=False) if pesan else ""
+    izin = KATA_IZIN.search(teks) is not None
+    if not izin and not extra.get("is_first_turn"):
+        return None
+    import vault_guard as g
+    # session_cwd hanya melayani pre_tool_call; dipanggil apa adanya dengan nama event itu, supaya penjaga vault tidak berubah
+    cwd = g.session_cwd(dict(payload, hook_event_name="pre_tool_call")) or payload.get("cwd") or os.getcwd()
+    project = project_name(args.projects_root, cwd)
+    if not project:
+        return None
+    if project not in args.skip and os.path.exists(os.path.join(args.projects_root, project, ".no-vault")):
+        return project_context(args.projects_root, args.vault, project)   # hanya larangan .no-vault, tanpa isi vault
+    if izin:
+        return hot_context(args.hot) if project in args.skip else project_context(args.projects_root, args.vault, project)
+    sumber = "hot.md" if project in args.skip else "halaman proyek"
+    return (f"Konteks proyek `{project}` ({sumber}) ada di vault, tapi tidak dikirim otomatis karena sesi ini memakai model "
+            "gratis (keputusan 31). Jangan membaca berkas vault sendiri. Kalau tugas ini butuh konteks proyek, minta pengguna "
+            "mengetik `pakai konteks` di pesan berikutnya.")
+
 def main():
     parser = argparse.ArgumentParser(description="Hook awal sesi: muat hot.md (mode AI Agent) atau halaman proyek dari vault (mode proyek).")
     parser.add_argument("hot", nargs="?", help="Path ke hot.md (mode AI Agent; di mode proyek dipakai untuk proyek yang di-skip)")
@@ -132,7 +160,8 @@ def main():
     parser.add_argument("--vault", help="Path vault memori (mode proyek)")
     parser.add_argument("--skip", action="append", default=[], help="Nama folder proyek yang dilewati, mis. 'AI Agent' (boleh diulang)")
     parser.add_argument("--format", choices=("claude", "hermes", "antigravity"), default="claude",
-                        help="claude: SessionStart Claude Code. hermes: pre_llm_call Hermes, hanya di giliran pertama (2026-11-03). "
+                        help="claude: SessionStart Claude Code. hermes: pre_llm_call Hermes, isi vault hanya sesudah kata izin "
+                             "`pakai konteks` (2026-11-11). "
                              "antigravity: SessionStart Antigravity, konteks lewat injectSteps (2026-11-08)")
     args = parser.parse_args()
 
@@ -144,8 +173,14 @@ def main():
             payload = {}
     if not isinstance(payload, dict):
         payload = {}
-    if args.format == "hermes" and not (payload.get("extra") or {}).get("is_first_turn"):
-        return   # pre_llm_call jalan di setiap giliran; konteks cukup sekali, di giliran pertama
+    if args.format == "hermes":
+        if not (args.projects_root and args.vault):
+            parser.error("format hermes butuh --projects-root dan --vault")
+        context = hermes_context(args, payload)   # pre_llm_call jalan di setiap giliran
+        if context:
+            sys.stdout.reconfigure(encoding="utf-8")
+            print(json.dumps({"context": context}, ensure_ascii=False))
+        return
     if args.projects_root and not args.vault:
         parser.error("--vault wajib di mode proyek")
     if not (args.projects_root or args.hot):

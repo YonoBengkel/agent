@@ -172,6 +172,9 @@ def uji_tool(nama, vault, berat):
         elif nama == "putar_log.py":
             k, o = jalan([py, "-B", "tools/putar_log.py", "--vault", vault, "--cek"])
             ok, pesan = k in (0, 1) and "entri" in o, "--cek pada vault, tanpa menulis"
+        elif nama == "cadangkan_vault.py":
+            k, o = jalan([py, "-B", "tools/cadangkan_vault.py", "--vault", vault, "--cek"])
+            ok, pesan = k == 0 and "Pindaian bersih" in o, "--cek: pindai vault tanpa commit atau push"
         elif nama == "medusa":
             k, o = jalan([AKAR / "tools" / "medusa-venv" / "Scripts" / "medusa.exe", "--version"])
             ok, pesan = k == 0 and "MEDUSA" in o, "hanya --version. Pindaian penuh berat untuk RAM mesin ini"

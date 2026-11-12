@@ -332,6 +332,34 @@ class SessionContext(unittest.TestCase):
             self.assertIn("Hangat", agy(os.path.join(root, "Toko"))["injectSteps"][0]["systemMessage"]["systemMessage"])
             self.assertEqual(agy(t), {})  # di luar folder proyek: tanpa konteks, tapi tetap JSON
 
+    def test_hermes_kata_izin(self):  # isi vault ke model Hermes hanya sesudah `pakai konteks` (2026-11-11)
+        import json, sqlite3, subprocess, tempfile
+        with tempfile.TemporaryDirectory() as t:
+            vault, root, home = os.path.join(t, "Vault"), os.path.join(t, "CODE"), os.path.join(t, "Hermes")
+            for d in (os.path.join(vault, "Wiki", "projects"), os.path.join(root, "Toko"), os.path.join(root, "Rahasia"), home):
+                os.makedirs(d)
+            with open(os.path.join(vault, "Wiki", "projects", "Toko.md"), "w", encoding="utf-8") as f:
+                f.write("# Toko\n\nisi halaman proyek toko\n")
+            open(os.path.join(root, "Rahasia", ".no-vault"), "w").close()
+            db = sqlite3.connect(os.path.join(home, "state.db"))
+            db.execute("CREATE TABLE sessions (id TEXT, cwd TEXT)")
+            db.executemany("INSERT INTO sessions VALUES (?, ?)", [("s1", os.path.join(root, "Toko")), ("s2", os.path.join(root, "Rahasia"))])
+            db.commit()
+            db.close()
+            skrip = os.path.join(os.path.dirname(os.path.abspath(__file__)), "session_context.py")
+            def hermes(sesi, pesan, pertama):
+                masuk = json.dumps({"hook_event_name": "pre_llm_call", "session_id": sesi, "cwd": home,
+                                    "extra": {"user_message": pesan, "is_first_turn": pertama}}).encode("utf-8")
+                r = subprocess.run([sys.executable, "-B", skrip, "--format", "hermes", "--projects-root", root, "--vault", vault],
+                                   input=masuk, capture_output=True, env=dict(os.environ, HERMES_HOME=home))
+                return json.loads(r.stdout)["context"] if r.stdout.strip() else None
+            awal = hermes("s1", "tolong cek kode toko", True)
+            self.assertIn("pakai konteks", awal)
+            self.assertNotIn("isi halaman proyek toko", awal)   # giliran pertama tanpa izin: tanpa isi vault
+            self.assertIsNone(hermes("s1", "lanjut", False))
+            self.assertIn("isi halaman proyek toko", hermes("s1", "oke, Pakai konteks ya", False))
+            self.assertIn(".no-vault", hermes("s2", "halo", True))   # proyek .no-vault: hanya larangannya
+
     def test_commit_warning(self):  # komit yang lebih baru dari catatan vault diberi satu baris peringatan (2026-11-10)
         import subprocess, tempfile, time
         import session_context as s
@@ -652,6 +680,12 @@ class CekProsesSisa(unittest.TestCase):  # proses alat sisa uji dilaporkan hook 
         self.assertIsNone(c.jenis(r'python D:\w\tools\vault_lint.py v --secrets-from "D:\w\9router\docker-compose.yml"'))
         self.assertEqual(c.jenis(r'docker compose -f "D:\w\9router\docker-compose.yml" up'), "docker")
         self.assertEqual(c.jenis(r"node D:\w\9router\server.js"), "9router")
+        # nilai argumen mirip rahasia disensor sebelum dicetak (2026-11-11)
+        s = c.sensor(r"agy.exe --hub --csrf_token=abc123 --api-key def456 --mode=x API_TOKEN=\"g h\"")
+        self.assertNotIn("abc123", s)
+        self.assertNotIn("def456", s)
+        self.assertNotIn("g h", s)
+        self.assertIn("--mode=x", s)
 
     # Tabel proses tiruan: aplikasi (1) -> sesi ini (10) -> bash (11) -> hook (12); sesi lain (20) -> next dev (21)
     T = 1000.0
@@ -708,6 +742,30 @@ class LessonIndex(unittest.TestCase):  # pelajaran baru wajib masuk Indeks per a
                 "| 1 | x |\n| 2 | y |\n| 3 | z |\n| 13 | w |\n")
         self.assertEqual(vault_lint.lessons_unindexed(page), ["#2", "#13"])   # #1 dan #3 tidak dihitung menyebut #13
         self.assertEqual(vault_lint.lessons_unindexed("# P\n\n## Daftar\n\n| 1 | x |\n"), ["halaman belum punya bagian Indeks per area"])
+
+class CadangkanVault(unittest.TestCase):  # vault dipindai dulu sebelum dikirim ke repo git privatnya (2026-11-11)
+    def test_pindai_lalu_commit(self):
+        import subprocess, tempfile
+        import cadangkan_vault as c
+        with tempfile.TemporaryDirectory() as v:
+            os.makedirs(os.path.join(v, ".obsidian"))
+            with open(os.path.join(v, ".obsidian", "graph.json"), "w") as f:
+                f.write('{"scale": 1.0542789475922718}')   # angka pengaturan grafik, bukan nomor identitas
+            a = os.path.join(v, "a.json")
+            with open(a, "w", encoding="utf-8") as f:
+                f.write('{"kunci": "rahasia-uji-123456"}')   # cadangan konfigurasi: bukan .md, tetap dipindai
+            self.assertEqual([r for r, _ in c.pindai(v, [], {"rahasia-uji-123456"})], ["a.json"])
+            with open(a, "w", encoding="utf-8") as f:
+                f.write('{"kunci": "<disensor>"}')
+            self.assertEqual(c.pindai(v, [], {"rahasia-uji-123456"}), [])
+            subprocess.run(["git", "-C", v, "init", "-q"], check=True)
+            skrip = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cadangkan_vault.py")
+            identitas = {k: "uji" for k in ("GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME")}
+            identitas.update({k: "uji@contoh.test" for k in ("GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL")})
+            r = subprocess.run([sys.executable, "-B", skrip, "--vault", v], capture_output=True, env=dict(os.environ, **identitas))
+            self.assertIn("Belum ada remote", r.stdout.decode("utf-8"))
+            log = subprocess.run(["git", "-C", v, "log", "--oneline"], capture_output=True).stdout.decode("utf-8")
+            self.assertIn("cadangan vault", log)
 
 class PutarLog(unittest.TestCase):  # log wiki diputar per bulan (2026-11-10)
     def test_putar_dan_ulang(self):
