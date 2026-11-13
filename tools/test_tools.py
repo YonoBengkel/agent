@@ -812,6 +812,14 @@ class RuleBackup(unittest.TestCase):
         import sync_rules
         self.assertIn("dot-claude", sync_rules.backup_path("B", os.path.join("C:" + os.sep, "Users", "x", ".claude", "CLAUDE.md")))
 
+class RagTranskrip(unittest.TestCase):  # arsip transkrip diindeks tanpa bagian alatnya (2026-11-14)
+    def test_tanpa_bagian_alat(self):
+        from rag_engine import tanpa_bagian_alat
+        t = ("# Sesi\n\n### [USER]\n\nhalo\n\n### [TOOL CALL] `Bash`\n\n```json\n{}\n```\n\n### [TOOL RESULT (error)]\n\n```\nx\n```\n\n"
+             "### [ASSISTANT]\n\njawab\n\n### [TOOL RESULT]\n\nsisa di akhir\n")
+        self.assertEqual(tanpa_bagian_alat(t), "# Sesi\n\n### [USER]\n\nhalo\n\n### [ASSISTANT]\n\njawab\n\n")
+        self.assertEqual(tanpa_bagian_alat("# Halaman\n\n## Bagian\n\nisi\n"), "# Halaman\n\n## Bagian\n\nisi\n")   # vault tidak berubah
+
 class LintDrift(unittest.TestCase):  # istilah pensiun, tag dicek yang tua, dan log penjaga (riset 2026-11-13, M8 dan C10)
     def test_istilah_dan_drift(self):
         import vault_lint as vl

@@ -87,6 +87,13 @@ def resolve_root(manifest, arg):
     return next((r for r in manifest["roots"] if os.path.normcase(r) == p), os.path.abspath(arg))
 
 HEADING = re.compile(r'(#{1,6}) +(.*)')
+# Bagian alat di arsip transkrip (export_transcript.py): sekitar 90 persen isinya keluaran alat, sedangkan yang dicari saat
+# lupa adalah percakapannya (2026-11-14). Judul ini tidak ada di vault, jadi berkas lain tidak berubah.
+BAGIAN_ALAT = re.compile(r'(?ms)^### \[TOOL (?:CALL|RESULT)[^\n]*\n.*?(?=^### \[|\Z)')
+
+def tanpa_bagian_alat(text):
+    """Teks tanpa bagian [TOOL CALL] dan [TOOL RESULT] transkrip. Pesan pengguna dan jawaban agent tetap utuh."""
+    return BAGIAN_ALAT.sub('', text)
 
 def chunk_sections(text, chunk_size=1000, overlap=0):
     """Memotong teks per heading Markdown; section yang terlalu panjang dipotong lagi per chunk_size,
@@ -221,7 +228,7 @@ def sync(collection, root, changed, removed, current, model, manifest):
                 print(f"[WARN] Gagal membaca {f}: {e}")
                 current.pop(rel, None)   # belum terindeks; dicoba lagi lain kali
             continue
-        for i, (trail, chunk) in enumerate(chunk_sections(content, overlap=CHUNK_OVERLAP)):
+        for i, (trail, chunk) in enumerate(chunk_sections(tanpa_bagian_alat(content), overlap=CHUNK_OVERLAP)):
             if chunk.strip():
                 docs.append(chunk)
                 ids.append(f"{f}_{i}")
