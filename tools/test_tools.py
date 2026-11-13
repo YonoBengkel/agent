@@ -743,6 +743,49 @@ class LessonIndex(unittest.TestCase):  # pelajaran baru wajib masuk Indeks per a
         self.assertEqual(vault_lint.lessons_unindexed(page), ["#2", "#13"])   # #1 dan #3 tidak dihitung menyebut #13
         self.assertEqual(vault_lint.lessons_unindexed("# P\n\n## Daftar\n\n| 1 | x |\n"), ["halaman belum punya bagian Indeks per area"])
 
+class PenjagaRepo(unittest.TestCase):  # repo pihak ketiga tidak boleh di-clone ke folder proyek tepercaya (2026-11-12)
+    D = "D:" + os.sep
+    ROOT, LUAR, PROYEK = os.path.join(D, "CODE"), os.path.join(D, "Repo Luar"), os.path.join(D, "CODE", "proyek")
+
+    def args(self):
+        import types
+        return types.SimpleNamespace(projects_root=self.ROOT, repo_luar=self.LUAR, own_owner=["PemilikSaya"])
+
+    def test_periksa(self):
+        import penjaga_repo as r
+        tolak = lambda cmd, base=self.PROYEK: r.periksa(cmd, base, self.args())
+        self.assertIn("Repo Luar", tolak("git clone https://github.com/teman/alat.git"))
+        self.assertIsNone(tolak("git clone https://github.com/PemilikSaya/agent"))                  # repo sendiri
+        self.assertIsNone(tolak(r'git clone D:\Kiriman\alat.git "D:\Repo Luar\alat"'))              # tujuan benar
+        self.assertIsNotNone(tolak("cd /d/CODE/proyek && git clone file:///d/Kiriman/alat.git", os.path.join(self.D, "x")))
+        self.assertIsNotNone(tolak("git clone /d/Kiriman/alat.git /d/CODE/proyek-tmp"))
+        self.assertIsNotNone(tolak('cp -a "D:/Repo Luar/alat/." D:/CODE/proyek/'))                # salinan dari repo luar
+        self.assertIsNotNone(tolak(r'Copy-Item -Recurse "D:\Repo Luar\alat" D:\CODE\proyek'))
+        self.assertIsNone(tolak("git clone https://github.com/teman/alat.git", os.path.join(self.D, "lain")))
+        self.assertIsNotNone(tolak(r"git -C D:\CODE\proyek clone https://github.com/teman/x"))
+        self.assertIsNotNone(tolak('bash -c "git clone https://gitlab.com/teman/x /d/CODE/y"'))
+        self.assertIsNotNone(tolak("gh repo clone teman/alat"))
+        self.assertIsNone(tolak("gh repo clone PemilikSaya/alat"))
+        self.assertIsNotNone(tolak(r"git clone --depth 1 -b main https://github.com/teman/alat.git D:\CODE\x"))
+        self.assertIsNone(tolak("git status && git log -1"))
+        self.assertIsNone(tolak(r"git clone D:\CODE\proyek-a D:\CODE\proyek-b"))                 # salinan lokal milik sendiri
+
+    def test_hook(self):  # format sungguhan: claude keluar 2, antigravity menjawab JSON dan keluar 0
+        import json, subprocess
+        skrip = os.path.join(os.path.dirname(os.path.abspath(__file__)), "penjaga_repo.py")
+        opsi = ["--projects-root", self.ROOT, "--repo-luar", self.LUAR, "--own-owner", "PemilikSaya"]
+        claude = {"tool_name": "Bash", "cwd": self.PROYEK, "tool_input": {"command": "git clone https://github.com/teman/alat"}}
+        r = subprocess.run([sys.executable, "-B", skrip, "--format", "claude", *opsi], input=json.dumps(claude).encode(), capture_output=True)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("Repo Luar", r.stderr.decode("utf-8"))
+        agy = {"toolCall": {"name": "run_command", "args": {"CommandLine": "git clone https://github.com/teman/alat"}},
+               "workspacePaths": [self.PROYEK]}
+        r = subprocess.run([sys.executable, "-B", skrip, "--format", "antigravity", *opsi], input=json.dumps(agy).encode(), capture_output=True)
+        self.assertEqual((r.returncode, json.loads(r.stdout)["decision"]), (0, "deny"))
+        lain = {"tool_name": "Read", "tool_input": {"file_path": "x"}}
+        r = subprocess.run([sys.executable, "-B", skrip, "--format", "claude", *opsi], input=json.dumps(lain).encode(), capture_output=True)
+        self.assertEqual(r.returncode, 0)
+
 class CadangkanVault(unittest.TestCase):  # vault dipindai dulu sebelum dikirim ke repo git privatnya (2026-11-11)
     def test_pindai_lalu_commit(self):
         import subprocess, tempfile

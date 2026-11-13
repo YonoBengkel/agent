@@ -175,6 +175,9 @@ def uji_tool(nama, vault, berat):
         elif nama == "cadangkan_vault.py":
             k, o = jalan([py, "-B", "tools/cadangkan_vault.py", "--vault", vault, "--cek"])
             ok, pesan = k == 0 and "Pindaian bersih" in o, "--cek: pindai vault tanpa commit atau push"
+        elif nama == "penjaga_repo.py":
+            k, o = jalan([py, "-B", "tools/penjaga_repo.py", "--help"])
+            ok, pesan = k == 0 and "repo-luar" in o, "--help. Logikanya diuji test_tools.py, jalur hook sungguhan diuji di sesi"
         elif nama == "medusa":
             k, o = jalan([AKAR / "tools" / "medusa-venv" / "Scripts" / "medusa.exe", "--version"])
             ok, pesan = k == 0 and "MEDUSA" in o, "hanya --version. Pindaian penuh berat untuk RAM mesin ini"
