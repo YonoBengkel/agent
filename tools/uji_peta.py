@@ -19,7 +19,10 @@ import subprocess
 import sys
 import tempfile
 
+import vault_guard  # pola Unicode tak terlihat yang sama dengan vault_lint.py (riset 2026-11-13)
+
 AKAR = pathlib.Path(__file__).resolve().parents[1]
+TEKS = (".md", ".py", ".js", ".mjs", ".json", ".txt", ".yaml", ".yml", ".html", ".css", ".sh", ".ps1")
 LULUS, PERINGATAN, GAGAL = "LULUS", "PERINGATAN", "GAGAL"
 PLATFORM = re.compile(r"mcp__[A-Za-z_-]+__|~/\.claude/")
 RELATIF = re.compile(r"`((?:scripts|references|assets|examples|templates|fixtures|lib)/[^`\s]+)`")
@@ -108,6 +111,8 @@ def uji_skill(path, akar_skill, akar_claude):
         bagian = s.relative_to(f.parent).parts
         if not s.is_file() or ".git" in bagian or "assets" in bagian:
             continue
+        if s.suffix in TEKS and (found := vault_guard.invisible(s.read_text(encoding="utf-8", errors="replace"))):
+            h.turun(PERINGATAN, f"Unicode tak terlihat di {'/'.join(bagian)}: {found}")   # skill pihak ketiga bisa menyelipkan instruksi
         if s.suffix == ".py":
             try:
                 compile(s.read_text(encoding="utf-8", errors="replace"), str(s), "exec")

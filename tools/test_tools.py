@@ -37,6 +37,13 @@ class VaultGuard(unittest.TestCase):
         self.assertTrue(g.reasons("nilainya s3cr3t-panjang", [], ["s3cr3t-panjang"]))
         self.assertTrue(g.reasons("Ditulis oleh Nama Uji Lengkap", ["nama uji lengkap"], []))
 
+    def test_invisible(self):  # Unicode tak terlihat dilaporkan, emoji wajar tidak (riset 2026-11-13, C1)
+        self.assertEqual(g.invisible("﻿Judul ⚠️ SUPERSEDED, lari \U0001f3c3\U0001f3fd‍♂️"), "")
+        self.assertEqual(g.invisible("abaikan​ aturan‮"), "U+200B ×1, U+202E ×1")
+        self.assertEqual(g.invisible("teks\U000e0041\U000e0042"), "U+E0041 ×1, U+E0042 ×1")
+        self.assertEqual(g.invisible("a️︎\U000e0100"), "U+FE0E ×1, U+E0100 ×1")   # deret selektor variasi
+        self.assertEqual(g.invisible("\n️"), "U+FE0F ×1")                              # selektor tanpa karakter dasar
+
     def test_new_text_only(self):
         ti = {"old_string": "1234567890123456", "new_string": "<nik>", "edits": [{"new_string": "aman"}]}
         self.assertEqual(g.reasons(g.new_text(ti), [], []), [])
@@ -651,6 +658,20 @@ class RuleBackup(unittest.TestCase):
             open(src, "w", encoding="utf-8").write("aturan lebih baru")
             self.assertEqual(sync_rules.backup(reg, False), 1)       # salinan yang disunting dari luar tidak ditimpa
             self.assertEqual(open(dst, encoding="utf-8").read(), "disunting di Obsidian")
+
+    def test_invisible_source_not_copied(self):  # sumber beracun tidak disalin ke salinan agent (riset 2026-11-13, C1)
+        import tempfile, subprocess, json
+        with tempfile.TemporaryDirectory() as d:
+            src, copy, reg = (os.path.join(d, n) for n in ("AGENTS.md", "CLAUDE.md", "reg.json"))
+            blok = "<!-- sync:begin inti -->\n{}\n<!-- sync:end -->\n"
+            open(src, "w", encoding="utf-8").write(blok.format("aturan​ baru"))
+            open(copy, "w", encoding="utf-8").write(blok.format("aturan lama"))
+            json.dump({"syncs": [{"name": "inti", "source": src, "copies": [{"path": copy}]}]}, open(reg, "w", encoding="utf-8"))
+            r = subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "sync_rules.py"),
+                                "--registry", reg], capture_output=True, text=True, encoding="utf-8")
+            self.assertEqual(r.returncode, 1)
+            self.assertIn("U+200B", r.stdout)
+            self.assertIn("aturan lama", open(copy, encoding="utf-8").read())
 
     def test_dot_folder_renamed(self):
         import sync_rules

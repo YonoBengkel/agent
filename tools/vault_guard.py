@@ -52,6 +52,27 @@ NULL_SINKS = {"/dev/null", "/dev/stdout", "/dev/stderr", "nul", "$null"}
 UNRESOLVED = re.compile(r"[$%`]|\{\}")  # target yang baru diketahui saat jalan
 PATH_END = r"(?=$|[\s;|&),\]}+])"  # akhir path sesudah kutipnya dilepas
 WINDOWS_SWITCH = re.compile(r"/[a-zA-Z]")  # dir /b dan cmd /c, bukan /d milik Git Bash
+TAK_TERLIHAT = re.compile("[​-‏⁠-⁤﻿‪-‮⁦-⁩"
+                          "\U000e0000-\U000e007f\U000e0100-\U000e01ef︀-️]")  # zero-width, bidi, blok tag, selektor variasi
+EMOJI = re.compile("[☀-➿\U0001f000-\U0001faff️]")
+
+def invisible(text):
+    """Unicode tak terlihat yang bisa menyembunyikan instruksi untuk agent, sebagai ringkasan 'U+200B ×2', atau ''.
+    Riset 2026-11-13 (langkah C1). Yang dibiarkan karena wajar di catatan: BOM di awal teks (dicek terpisah), satu
+    selektor variasi sesudah karakter biasa (tanda peringatan di penanda SUPERSEDED), dan ZWJ di dalam emoji gabungan."""
+    found = {}
+    for m in TAK_TERLIHAT.finditer(text):
+        c, i = m.group(), m.start()
+        before, after = text[i - 1:i], text[i + 1:i + 2]
+        if c == "﻿" and i == 0:
+            continue
+        if "︀" <= c <= "️" and before and not before.isspace() and not TAK_TERLIHAT.match(before):
+            continue
+        if c == "‍" and EMOJI.match(before) and EMOJI.match(after):
+            continue
+        key = f"U+{ord(c):04X}"
+        found[key] = found.get(key, 0) + 1
+    return ", ".join(f"{k} ×{n}" for k, n in found.items())
 
 def banned_words(path):
     """Satu entri per baris; baris kosong dan baris yang diawali # dilewati."""

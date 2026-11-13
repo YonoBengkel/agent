@@ -4,6 +4,7 @@ import sys
 import json
 import hashlib
 import argparse
+import vault_guard  # pola Unicode tak terlihat yang sama dengan vault_lint.py (riset 2026-11-13)
 
 # Bagian bersama diapit penanda ini, di sumber maupun di setiap salinan. Yang di luar penanda
 # (judul, batas berlaku khusus platform) milik masing-masing file dan tidak disentuh.
@@ -124,6 +125,10 @@ def main():
     for s in reg["syncs"]:
         print(f"# {s['name']} (sumber: {s['source']})")
         src, _ = read(s["source"])
+        if bad := vault_guard.invisible(src):   # satu suntingan beracun di sumber menyebar ke semua agent
+            print(f"  [UNICODE TAK TERLIHAT] {s['source']}: {bad}. Sumber ini tidak disalin sampai dibersihkan")
+            problems += 1
+            continue
         sp = span(src)
         if not sp:
             print("  [GAGAL] penanda sync tidak ada di sumber")
@@ -142,6 +147,9 @@ def main():
                 print(f"  [TIDAK TERJANGKAU] {path}: {e}")
                 problems += 1
                 continue
+            if bad := vault_guard.invisible(text):
+                print(f"  [UNICODE TAK TERLIHAT] {path}: {bad}")
+                problems += 1
             cp = span(text, label)
             if not cp:
                 print(f"  [TANPA PENANDA] {path}: bagian '{label}' tidak ada, tidak disentuh")
@@ -170,6 +178,9 @@ def main():
             print(f"  [TIDAK TERJANGKAU] {t['mirror']}: {e}")
             problems += 1
             continue
+        if bad := vault_guard.invisible(text):
+            print(f"  [UNICODE TAK TERLIHAT] {t['mirror']}: {bad}")
+            problems += 1
         m = STAMP.search(text)
         if os.path.normcase(os.path.abspath(t["mirror"])) in stamp:
             body = STAMP.sub("", text).rstrip("\n") + "\n"

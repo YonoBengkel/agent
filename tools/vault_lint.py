@@ -222,7 +222,7 @@ def main():
 
     files = list(md_files(args.vault))
     names = {os.path.splitext(os.path.basename(p))[0]: p for p in files}
-    text, empty, bom, control = {}, [], [], []
+    text, empty, bom, control, invisible = {}, [], [], [], []
     for p in files:
         raw = open(p, "rb").read()
         if not raw.strip():
@@ -232,6 +232,8 @@ def main():
         text[p] = raw.decode("utf-8", errors="replace")
         if any(ord(c) < 32 and c not in "\r\n\t" for c in text[p]):   # sisa escape yang rusak, mis. \b atau \f (Pelajaran #11)
             control.append(p)
+        if found := vault_guard.invisible(text[p]):   # bisa menyembunyikan instruksi untuk agent (riset 2026-11-13)
+            invisible.append((p, found))
 
     canonical = {n: n for n in names}   # nama atau alias → nama file halamannya
     for p, t in text.items():
@@ -305,6 +307,8 @@ def main():
     section("File kosong (0 byte / hanya spasi)", [rel(p) for p in empty])
     section("File dengan BOM UTF-8", [rel(p) for p in bom])
     section("File dengan karakter kontrol (escape backslash yang rusak)", [rel(p) for p in control])
+    section("File dengan Unicode tak terlihat (zero-width, bidi, blok tag, deret selektor variasi)",
+            [f"{rel(p)}: {found}" for p, found in invisible])
     unnumbered, dup_numbers = log_numbering(sorted(files), os.path.join(args.vault, "Log"))
     section("Log tanpa nomor urut di depan nama (Aturan 4)", [rel(p) for p in unnumbered])
     section("Log dengan nomor ganda dalam satu folder", [rel(p) for p in dup_numbers])
