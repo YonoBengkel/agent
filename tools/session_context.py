@@ -35,15 +35,25 @@ def compile_reminder(vault):
     advice = " Ambang Aturan 12 (≥5) terlewati: tawarkan `kompilasi`." if n >= 5 else ""
     return f"\n\n[Pengingat Kompilasi] {n} log sesi berubah sesudah kompilasi terakhir ({last}).{advice}"
 
-def hot_context(hot):
-    """Mode AI Agent: muat hot.md (Aturan 1), plus pengingat Kompilasi."""
+def canary_warning(root=None):
+    """Satu baris kalau canary lintas agent sudah basi, karena aturan, hook, versi agent, atau modelnya berubah sesudah run
+    terakhir (riset 2026-11-13, M4). Folder proyek bawaannya induk workspace ini (D:/CODE/AI Agent/tools -> D:/CODE)."""
+    try:
+        import uji_agen
+        line = uji_agen.peringatan_basi(root or os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    except Exception:
+        return ""
+    return f"\n\n{line}" if line else ""
+
+def hot_context(hot, root=None):
+    """Mode AI Agent: muat hot.md (Aturan 1), plus pengingat Kompilasi dan peringatan canary basi."""
     try:
         with open(hot, encoding="utf-8-sig") as f:
             text = f.read()
     except OSError as e:
         text = f"[hot.md tidak bisa dibaca: {e}. Baca manual sesuai Aturan 1.]"
     return ("Isi hot.md, dimuat otomatis di awal sesi (Aturan 1). Ini cache; detail ada di index.md dan KONTEKS_PROYEK.md.\n\n"
-            + text + compile_reminder(os.path.dirname(os.path.abspath(hot))))
+            + text + compile_reminder(os.path.dirname(os.path.abspath(hot))) + canary_warning(root))
 
 def project_name(root, cwd):
     """Folder proyek tingkat pertama di bawah root untuk folder kerja ini, atau None kalau di luar root."""
@@ -147,7 +157,7 @@ def hermes_context(args, payload):
     if project not in args.skip and os.path.exists(os.path.join(args.projects_root, project, ".no-vault")):
         return project_context(args.projects_root, args.vault, project)   # hanya larangan .no-vault, tanpa isi vault
     if izin:
-        return hot_context(args.hot) if project in args.skip else project_context(args.projects_root, args.vault, project)
+        return hot_context(args.hot, args.projects_root) if project in args.skip else project_context(args.projects_root, args.vault, project)
     sumber = "hot.md" if project in args.skip else "halaman proyek"
     return (f"Konteks proyek `{project}` ({sumber}) ada di vault, tapi tidak dikirim otomatis karena sesi ini memakai model "
             "gratis (keputusan 31). Jangan membaca berkas vault sendiri. Kalau tugas ini butuh konteks proyek, minta pengguna "
@@ -191,7 +201,7 @@ def main():
             cwd = payload.get("cwd") or next(iter(payload.get("workspacePaths") or []), None) or os.getcwd()
             project = project_name(args.projects_root, cwd)
             if project and project in args.skip:
-                context = hot_context(args.hot) if args.hot else None   # mis. AI Agent: halamannya hot.md (Aturan 1)
+                context = hot_context(args.hot, args.projects_root) if args.hot else None   # mis. AI Agent: halamannya hot.md (Aturan 1)
             else:
                 context = project_context(args.projects_root, args.vault, project) if project else None
         else:

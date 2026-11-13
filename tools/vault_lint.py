@@ -7,6 +7,7 @@ import hashlib
 import time
 import fnmatch
 import argparse
+import itertools
 from collections import Counter, defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -60,6 +61,81 @@ def rag_staleness(vault):
 TICK = re.compile(r"`([^`\n]+)`")
 PATH_ROOTS = ("log/", "wiki/", "ai workspace/", "tools/", "konfigurasi/", "riwayat perckapan/", ".claude/", ".agents/", "9router/", "d:/")
 RETIRED = ("Recycle Bin", "dipensiunkan", "pensiun", "SUPERSEDED", "~~")
+MARKER = re.compile(r"⚠️?\s*SUPERSEDED\s+(\d{4}-\d{2}-\d{2})")   # penanda Aturan 10 yang bertanggal, bukan templatnya
+ISTILAH = re.compile(r"(?i)istilah pensiun\s*:(.*)")
+TERKAIT = re.compile(r"^\s*(?:Terkait dengan|Related to)\s*:")   # baris backlink: rujukan, bukan klaim keadaan sekarang
+BERTANGGAL = ("Log/", "Riwayat/", "Cadangan Aturan/", "Wiki/sources/")   # catatan keadaan saat itu, bukan keadaan sekarang
+SEJARAH = ("log", "log_id", "Pelajaran")   # jurnal dan pelajaran menceritakan masa lalu
+CEK = re.compile(r"(?i)\bdicek\b[^\n()]{0,60}?(\d{4}-\d{2}-\d{2})")
+
+def living(rel_path):
+    """Halaman yang mengklaim keadaan sekarang: bukan log, riwayat, cadangan, sumber bertanggal, jurnal wiki, atau pelajaran."""
+    rel_path = rel_path.replace("\\", "/")   # relpath Windows memakai backslash
+    return not rel_path.startswith(BERTANGGAL) and os.path.splitext(os.path.basename(rel_path))[0] not in SEJARAH
+
+def retired_terms(text, rel):
+    """{istilah: (halaman, tanggal, seluruh halaman)} dari penanda SUPERSEDED (riset 2026-11-13, M8). Penanda bisa menyebut istilahnya di
+    barisnya atau baris kutipan sesudahnya: `istilah pensiun: ` diikuti istilah dalam backtick. Penanda tanpa daftar itu
+    yang ada sebelum judul bagian pertama halaman wiki memensiunkan halamannya, jadi nama dan aliasnya ikut."""
+    terms = {}
+    for p, t in text.items():
+        r = rel(p).replace("\\", "/")
+        if r.startswith("Cadangan Aturan/"):
+            continue
+        lines, kepala = t.splitlines(), len(re.split(r"(?m)^## ", t, maxsplit=1)[0].splitlines())
+        for i, line in enumerate(lines):
+            m = MARKER.search(line)
+            if not m:
+                continue
+            daftar = [x for b in [line, *itertools.takewhile(lambda l: l.lstrip().startswith(">"), lines[i + 1:])]
+                      if (k := ISTILAH.search(b)) for x in TICK.findall(k.group(1))]
+            seluruh = not daftar and i < kepala and r.startswith("Wiki/")
+            for x in [os.path.splitext(os.path.basename(p))[0], *aliases(t)] if seluruh else daftar:
+                terms.setdefault(x, (p, m.group(1), seluruh))
+    return terms
+
+def drift(text, rel, terms):
+    """(halaman, baris, istilah, halaman penanda, tanggal) untuk halaman hidup yang masih menyebut istilah pensiun tanpa
+    menandai di baris itu bahwa ia sudah pensiun (Pelajaran #13: model RAG diganti, 4 halaman masih menyebut yang lama).
+    Satu baris pertama per halaman per istilah. Hanya kandidat: agent yang menilai apakah klaimnya basi."""
+    found = []
+    pats = {x: re.compile(r"(?<![\w-])" + re.escape(x) + r"(?![\w-])", re.I) for x in terms}
+    for p, t in text.items():
+        if not living(rel(p)):
+            continue
+        for x, (src, tgl, seluruh) in terms.items():
+            if seluruh and src == p:   # halaman yang pensiun seluruhnya memang sejarah; halaman penanda biasa tetap dicek
+                continue
+            n = next((n for n, line in enumerate(t.splitlines(), 1) if pats[x].search(line) and not TERKAIT.match(line)
+                      and not any(r in line for r in RETIRED + ("digantikan", "diganti "))), None)
+            if n:
+                found.append((p, n, x, src, tgl))
+    return found
+
+def old_checks(text, rel, days, now=None):
+    """(halaman, baris, tanggal) untuk tag `dicek <tanggal>` di halaman hidup yang lebih tua dari `days` hari (riset M8, ide
+    sitasi memori Copilot yang kedaluwarsa sesudah 90 hari): faktanya perlu dicek ulang sebelum dipakai."""
+    batas = time.strftime("%Y-%m-%d", time.localtime((now or time.time()) - days * 86400))
+    return [(p, t.count("\n", 0, m.start()) + 1, m.group(1)) for p, t in text.items() if living(rel(p))
+            for m in CEK.finditer(t) if m.group(1) < batas]
+
+def guard_log(folder, month=None):
+    """Hitungan keputusan penjaga di log JSONL bulan ini (riset C10): {(penjaga, keputusan, aturan): n}, atau None kalau
+    belum ada lognya."""
+    path = os.path.join(folder, (month or time.strftime("%Y-%m")) + ".jsonl")
+    if not os.path.isfile(path):
+        return None
+    c = Counter()
+    for l in open(path, encoding="utf-8", errors="replace"):
+        if not l.strip():
+            continue
+        try:
+            d = json.loads(l)
+        except ValueError:
+            c[("?", "baris rusak", "")] += 1
+            continue
+        c[(d.get("penjaga"), d.get("keputusan"), d.get("aturan"))] += 1
+    return c
 
 def stale_paths(pages, text, bases):
     """Verifikasi rujukan saat dipakai (ide sistem memori GitHub Copilot, 2026-10-16): path di dalam backtick pada
@@ -217,6 +293,7 @@ def main():
     parser.add_argument("--words", help="Daftar kata terlarang yang sama dengan hook penjaga (Konfigurasi/penjaga_vault_terlarang.txt)")
     parser.add_argument("--projects-root", help="Folder proyek, mis. D:/CODE: cek proyek yang berubah tanpa log (lambat, ±30 detik)")
     parser.add_argument("--active-days", type=int, default=14, help="Folder yang berubah dalam sekian hari dianggap aktif")
+    parser.add_argument("--verify-days", type=int, default=90, help="Tag `dicek <tanggal>` yang lebih tua dari ini didaftar untuk dicek ulang")
     args = parser.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")
 
@@ -318,6 +395,19 @@ def main():
     if lessons in text:
         section("Pelajaran yang belum masuk Indeks per area (Aturan 10)", lessons_unindexed(text[lessons]))
     section("Rujukan path yang tidak ada lagi (halaman wiki dan hot.md)", [f"{rel(p)}: `{s}`" for p, s in dead_paths])
+    terms = retired_terms(text, rel)
+    print(f"\nMetrik: istilah pensiun dibaca dari penanda SUPERSEDED bertanggal (Aturan 10): nama dan alias halaman wiki yang "
+          f"penandanya di atas judul bagian pertama, plus `istilah pensiun:` di penanda mana pun. {len(terms)} istilah: "
+          f"{', '.join(sorted(terms)) or '-'}. Halaman hidup = bukan log, Riwayat, cadangan, Wiki/sources, jurnal wiki, atau Pelajaran.")
+    section("Halaman hidup yang masih menyebut istilah pensiun (kandidat drift, nilai sendiri)",
+            [f"{rel(p)}:{n}: `{x}` (pensiun {tgl} di {rel(src)})" for p, n, x, src, tgl in drift(text, rel, terms)])
+    section(f"Tag `dicek <tanggal>` lebih tua dari {args.verify_days} hari di halaman hidup (cek ulang sebelum dipakai)",
+            [f"{rel(p)}:{n}: dicek {d}" for p, n, d in old_checks(text, rel, args.verify_days)])
+    print("\nMetrik: pola `vault_guard.injeksi` (instruksi yang ditujukan ke agent, tag peran palsu, sintaks pemanggilan tool, "
+          "URL berparameter di luar yang lazim) di seluruh vault, termasuk log yang dibaca Compile. Hanya laporan: halaman yang membahas injeksi wajar memuatnya, "
+          "tapi teks seperti ini tidak boleh sampai ke hot.md, KONTEKS_PROYEK.md, atau halaman system (riset M5).")
+    section("Pola muatan injeksi", [f"{rel(p)}: " + "; ".join(f"{k} (baris {n})" for k, n in found)
+                                    for p in sorted(text) if (found := vault_guard.injeksi(text[p]))])
     print("\nMetrik: halaman di `Wiki/concepts/` yang tidak punya link langsung (masuk atau keluar) dengan halaman `Wiki/system/` atau `Wiki/projects/`. Kaitan ke sistem kita yang tidak ditulis tidak bisa ditemukan RAG (Aturan 11, Wiki-to-System).")
     print("Saran per konsep: halaman system/projects dengan skor Adamic-Adar tertinggi atas tetangga bersama (log ikut sebagai penghubung, hub kontrol tidak). Hanya saran: tulis kaitannya kalau memang nyata, atau tulis bahwa tidak ada.")
     section("Konsep tanpa kaitan ke sistem atau proyek", [f"[[{n}]]" + (" — saran: " + "; ".join(f"[[{t}]] (lewat {', '.join(c)})" for _, t, c in suggestions[n]) if suggestions[n] else "") for n in unlinked])
@@ -346,6 +436,12 @@ def main():
     print("\nMetrik: pola `tools/vault_guard.py` (angka 16 digit, kata terlarang, assignment mirip secret) atas seluruh isi file. "
           "Menangkap juga tulisan yang lolos dari hook, misalnya lewat skrip atau agent tanpa hook.")
     section("File vault yang memuat teks terlarang (protokol D:\\CODE, Always)", [f"{rel(p)}: {', '.join(f)}" for p, f in forbidden])
+    log_penjaga = guard_log(vault_guard.folder_log())
+    if log_penjaga is None:
+        print(f"\n## Log keputusan penjaga bulan ini — belum ada ({vault_guard.folder_log()})")
+    else:
+        section("Log keputusan penjaga bulan ini (tolak, lapor, galat per penjaga dan aturan)",
+                [f"{pj} {kp}: {at} ×{n}" for (pj, kp, at), n in sorted(log_penjaga.items(), key=lambda x: (-x[1], str(x[0])))])
     if args.projects_root:
         pages = {os.path.splitext(os.path.basename(p))[0]: (p, text[p]) for p in wiki_pages if os.sep + "projects" + os.sep in p}
         # folder yang path-nya disebut di vault (mis. repo tugas yang dirujuk dari log kuliah) dihitung tercatat

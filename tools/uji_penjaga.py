@@ -42,12 +42,12 @@ HTML = "<p>uji penjaga</p>"
 RINGKASAN = re.compile(r"Checking \d+ configured|\d+ issue\(s\) found|All shell hooks look healthy|No shell hooks configured")
 
 
-def potong_hooks(teks):
-    """Baris bagian hooks saja: dari `hooks:` di kolom pertama sampai kunci tingkat atas berikutnya."""
+def potong_hooks(teks, kunci="hooks"):
+    """Baris satu bagian tingkat atas saja (bawaannya hooks): dari `kunci:` di kolom pertama sampai kunci tingkat atas berikutnya."""
     baris, ambil = [], False
     for l in teks.splitlines():
         if re.match(r"[^\s#]", l):
-            ambil = re.match(r"hooks\s*:", l) is not None
+            ambil = re.match(re.escape(kunci) + r"\s*:", l) is not None
         if ambil:
             baris.append(l)
     return "\n".join(baris)
@@ -196,9 +196,22 @@ def jalankan(platform, h, data, fx, folder):
 
 
 def keputusan(platform, kode, keluaran):
-    """'ditolak', 'diizinkan', atau keterangan galat, dibaca seperti platformnya membaca hasil hook."""
+    """'ditolak', 'ditanya', 'diizinkan', atau keterangan galat, dibaca seperti platformnya membaca hasil hook. Claude: keluar 0
+    dengan JSON permissionDecision ask berarti ditanya ke pengguna (pagar shell, riset M7)."""
     if kode is None:
         return "tidak jalan"
+    if platform == "claude" and kode == 0 and keluaran.strip():
+        try:
+            d = (json.loads(keluaran).get("hookSpecificOutput") or {}).get("permissionDecision")
+        except (ValueError, AttributeError):
+            return "galat, stdout bukan JSON"
+        return {"ask": "ditanya", "deny": "ditolak", "allow": "diizinkan"}.get(d, f"galat, permissionDecision {d!r}")
+    if platform == "hermes" and kode == 0 and keluaran.strip():   # JSON action: approve = gerbang persetujuan manusia (M1)
+        try:
+            d = json.loads(keluaran).get("action")
+        except (ValueError, AttributeError):
+            return "galat, stdout bukan JSON"
+        return {"approve": "ditanya", "block": "ditolak"}.get(d, "diizinkan")
     if platform != "antigravity":
         return {2: "ditolak", 0: "diizinkan"}.get(kode, f"galat, keluar {kode}")
     if kode != 0:
@@ -207,7 +220,7 @@ def keputusan(platform, kode, keluaran):
         d = json.loads(keluaran).get("decision")
     except (ValueError, AttributeError):
         return "galat, stdout bukan JSON"
-    return {"deny": "ditolak", "allow": "diizinkan"}.get(d, f"galat, decision {d!r}")
+    return {"deny": "ditolak", "ask": "ditanya", "allow": "diizinkan"}.get(d, f"galat, decision {d!r}")
 
 
 def siapkan(t, vault):
@@ -247,26 +260,37 @@ def payload(platform, alat, masukan, fx, sudah_baca=False):
             "transcript_path": fx.baca_claude if sudah_baca else fx.kosong, "tool_name": alat, "tool_input": masukan}
 
 
-def kasus(platform, vault, root, kerja):
-    """(penjaga, alat, masukan wajib tolak, masukan wajib lolos, kembaran lolos memakai riwayat sudah-baca). Nama berkas acak
-    supaya belum ada; penjaga_desain hanya menolak berkas tampilan baru."""
+def kasus(platform, vault, root, kerja, lindung):
+    """(penjaga, alat, masukan uji, masukan wajib lolos, kembaran lolos memakai riwayat sudah-baca, keputusan yang diharapkan
+    untuk masukan uji). Nama berkas acak supaya belum ada; penjaga_desain hanya menolak berkas tampilan baru. Masukan untuk
+    vault pribadi (lindung) hanya menyebut berkas yang tidak ada, dan tidak pernah dijalankan."""
     nama = f"uji-penjaga-{uuid.uuid4().hex[:8]}"
     catatan, html, tujuan = f"{vault}/{nama}.md", f"{root}/uji-probe-desain/{nama}.html", f"{root}/uji-probe-repo"
+    pribadi = f"{lindung}/{nama}.md"
     clone = "git clone https://github.com/orang-lain/contoh.git " + (f'"{tujuan}"' if " " in tujuan else tujuan)
     if platform == "claude":
-        return [("vault_guard", "Write", {"file_path": catatan, "content": NIK}, {"file_path": catatan, "content": BIASA}, False),
+        return [("vault_guard", "Write", {"file_path": catatan, "content": NIK}, {"file_path": catatan, "content": BIASA}, False, "ditolak"),
                 ("vault_guard", "Edit", {"file_path": catatan, "old_string": "x", "new_string": NIK},
-                 {"file_path": catatan, "old_string": "x", "new_string": BIASA}, False),
-                ("penjaga_repo", "Bash", {"command": clone}, {"command": "git status"}, False),
-                ("penjaga_repo", "PowerShell", {"command": clone}, {"command": "git status"}, False),
-                ("penjaga_desain", "Write", {"file_path": html, "content": HTML}, {"file_path": html, "content": HTML}, True)]
+                 {"file_path": catatan, "old_string": "x", "new_string": BIASA}, False, "ditolak"),
+                ("vault_guard", "Bash", {"command": f'cat "{pribadi}"'}, {"command": "git status"}, False, "ditolak"),
+                ("vault_guard", "PowerShell", {"command": f'Get-Content "{pribadi}"'}, {"command": f'Set-Content -Path "{catatan}" -Value x'}, False, "ditolak"),
+                ("penjaga_repo", "Bash", {"command": clone}, {"command": "git status"}, False, "ditolak"),
+                ("penjaga_repo", "PowerShell", {"command": clone}, {"command": "git status"}, False, "ditolak"),
+                ("penjaga_desain", "Write", {"file_path": html, "content": HTML}, {"file_path": html, "content": HTML}, True, "ditolak")]
     if platform == "hermes":
-        return [("vault_guard", "write_file", {"path": catatan, "content": NIK}, {"path": catatan, "content": BIASA}, False),
-                ("vault_guard", "terminal", {"command": f'echo x > "{catatan}"'}, {"command": "ls"}, False),
-                ("penjaga_repo", "terminal", {"command": clone}, {"command": "git status"}, False),
-                ("penjaga_desain", "write_file", {"path": html, "content": HTML}, {"path": html, "content": HTML}, True)]
-    return [("penjaga_repo", "run_command", {"CommandLine": clone, "Cwd": kerja}, {"CommandLine": "git status", "Cwd": kerja}, False),
-            ("penjaga_desain", "write_file", {"Path": html}, {"Path": html}, True)]
+        return [("vault_guard", "write_file", {"path": catatan, "content": NIK}, {"path": catatan, "content": BIASA}, False, "ditolak"),
+                ("vault_guard", "terminal", {"command": f'echo x > "{catatan}"'}, {"command": "ls"}, False, "ditolak"),
+                ("vault_guard", "read_file", {"path": pribadi}, {"path": f"{root}/{nama}.md"}, False, "ditolak"),
+                ("penjaga_repo", "terminal", {"command": clone}, {"command": "git status"}, False, "ditolak"),
+                ("penjaga_repo", "write_file", {"path": f"{tujuan}/.claude/settings.json", "content": "{}"},
+                 {"path": f"{tujuan}/{nama}.md", "content": BIASA}, False, "ditanya"),
+                ("penjaga_repo", "terminal", {"command": "npm install left-pad"}, {"command": "npm ci"}, False, "ditanya"),
+                ("penjaga_desain", "write_file", {"path": html, "content": HTML}, {"path": html, "content": HTML}, True, "ditolak")]
+    return [("vault_guard", "write_to_file", {"TargetFile": catatan, "CodeContent": NIK}, {"TargetFile": catatan, "CodeContent": BIASA}, False, "ditolak"),
+            ("vault_guard", "view_file", {"AbsolutePath": pribadi}, {"AbsolutePath": f"{root}/{nama}.md"}, False, "ditolak"),
+            ("vault_guard", "run_command", {"CommandLine": f'type "{pribadi}"', "Cwd": kerja}, {"CommandLine": f'echo x > "{catatan}"', "Cwd": kerja}, False, "ditolak"),
+            ("penjaga_repo", "run_command", {"CommandLine": clone, "Cwd": kerja}, {"CommandLine": "npm install left-pad", "Cwd": kerja}, False, "ditolak"),
+            ("penjaga_desain", "write_file", {"Path": html}, {"Path": html}, True, "ditolak")]
 
 
 def uji_satu(platform, h, data, fx, folder):
@@ -276,9 +300,12 @@ def uji_satu(platform, h, data, fx, folder):
     return keputusan(platform, kode, out), pesan[:160]
 
 
-def uji_platform(platform, entri, fx, vault, root, folder):
-    """Baris (platform, penjaga, alat, hasil wajib tolak, hasil wajib lolos, status, catatan) per penjaga dan alat yang diuji."""
-    baris, semua = [], kasus(platform, vault, root, fx.kerja)
+def uji_platform(platform, entri, fx, vault, root, folder, lindung):
+    """Baris (platform, penjaga, alat, hasil masukan uji, hasil wajib lolos, status, catatan) per penjaga dan alat yang diuji."""
+    dari_hook = [p.replace("\\", "/") for h in entri if "vault_guard" in teks_perintah(h, folder)
+                 for p in re.findall(r'--protect\s+"([^"]+)"', teks_perintah(h, folder))]
+    # Tanpa --protect di hook mana pun, kasus vault pribadi memakai folder yang tidak dijaga, jadi hasilnya GAGAL
+    baris, semua = [], kasus(platform, vault, root, fx.kerja, lindung or (dari_hook[0] if dari_hook else f"{root}/vault-pribadi-tidak-dijaga"))
     for penjaga in PENJAGA:
         terpasang = [h for h in entri if penjaga in teks_perintah(h, folder)]
         daftar = [k for k in semua if k[0] == penjaga]
@@ -286,7 +313,7 @@ def uji_platform(platform, entri, fx, vault, root, folder):
             baris.append((platform, penjaga, "-", "-", "-", "-",
                           "tidak terpasang" if not terpasang else "terpasang, tapi belum ada payload uji untuk platform ini"))
             continue
-        for _, alat, tolak, lolos, sudah_baca in daftar:
+        for _, alat, tolak, lolos, sudah_baca, harap in daftar:
             kena = [h for h in terpasang if cocok(platform, h.get("matcher"), alat)]
             if not kena:
                 baris.append((platform, penjaga, alat, "-", "-", "GAGAL", f"matcher hook tidak mencakup {alat}"))
@@ -296,9 +323,9 @@ def uji_platform(platform, entri, fx, vault, root, folder):
                     continue
                 t, pesan_t = uji_satu(platform, h, payload(platform, alat, tolak, fx), fx, folder)
                 l, pesan_l = uji_satu(platform, h, payload(platform, alat, lolos, fx, sudah_baca), fx, folder)
-                ok = (t, l) == ("ditolak", "diizinkan")
+                ok = (t, l) == (harap, "diizinkan")
                 baris.append((platform, penjaga, alat, t, l, "OK" if ok else "GAGAL",
-                              "" if ok else pesan_t if t != "ditolak" else pesan_l))
+                              "" if ok else pesan_t if t != harap else pesan_l))
     return baris
 
 
@@ -333,12 +360,15 @@ def main():
                                                          "Hook yang belum di-allowlist dihitung gagal")
     p.add_argument("--vault", default="D:/Obsidian/All Sources/AI Workspace", help="Vault memori yang wajib dijaga")
     p.add_argument("--projects-root", default="D:/CODE", help="Folder proyek tepercaya yang wajib dijaga")
+    p.add_argument("--lindung", help="Folder --protect untuk kasus wajib tolak. Bawaannya dibaca dari argumen --protect hook "
+                                     "vault_guard yang terpasang. Hanya nama berkas acak yang tidak ada yang disebut")
     a = p.parse_args()
     konfigurasi = [(n, v) for n, v in (("claude", a.claude_settings), ("antigravity", a.antigravity_hooks),
                                        ("hermes", a.hermes_config)) if v]
     if not konfigurasi:
         p.error("beri minimal satu dari --claude-settings, --antigravity-hooks, atau --hermes-config")
     vault, root = (x.replace("\\", "/").rstrip("/") for x in (a.vault, a.projects_root))
+    lindung = (a.lindung or "").replace("\\", "/").rstrip("/") or None
     print(f"Uji penjaga terpasang. Vault: {vault}. Folder proyek: {root}.")
     jumlah = gagal = 0
     with tempfile.TemporaryDirectory(prefix="uji-penjaga-", ignore_cleanup_errors=True) as t:
@@ -351,12 +381,12 @@ def main():
                 print(f"{platform:<12} konfigurasi {path} tidak terbaca ({type(e).__name__})  GAGAL")
                 jumlah, gagal = jumlah + 1, gagal + 1
                 continue
-            for pl, penjaga, alat, tolak, lolos, status, catatan in uji_platform(platform, entri, fx, vault, root, os.path.dirname(path)):
+            for pl, penjaga, alat, tolak, lolos, status, catatan in uji_platform(platform, entri, fx, vault, root, os.path.dirname(path), lindung):
                 if status == "-":
                     print(f"{pl:<12} {penjaga:<15} {catatan}")
                     continue
                 jumlah, gagal = jumlah + 1, gagal + (status == "GAGAL")
-                print(f"{pl:<12} {penjaga:<15} {alat:<12} wajib tolak: {tolak:<10} wajib lolos: {lolos:<10} {status}"
+                print(f"{pl:<12} {penjaga:<15} {alat:<20} uji: {tolak:<10} wajib lolos: {lolos:<10} {status}"
                       + (f"  ({catatan})" if catatan else ""))
         if a.hermes_doctor:
             laporan, mati = dokter(a.hermes_doctor, a.hermes_config, fx)

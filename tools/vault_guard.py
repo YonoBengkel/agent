@@ -1,16 +1,22 @@
-"""Hook sebelum tool menulis atau membuka folder terjaga (protokol D:\\CODE bagian Always, Aturan 9). Tiga tugas:
-1. Tool tulis berkas, PreToolUse Claude Code (Write/Edit/MultiEdit) dan pre_tool_call Hermes (write_file/patch): tolak
-   tulisan ke vault kalau teks barunya memuat nomor dokumen identitas, kata terlarang, atau secret. Daftar kata dan nilai
-   secret dibaca dari file lokal lewat argumen, jadi tidak tertulis di sini.
-2. Pagar shell Hermes (terminal/execute_code, sejak 2026-11-06): tolak perintah yang menulis, menghapus, atau pindah
-   folder ke vault, apa pun isinya. Kode execute_code ditolak kalau menyebut path vault.
+"""Hook sebelum tool menulis atau membuka folder terjaga (protokol D:\\CODE bagian Always, Aturan 9). Empat tugas:
+1. Tool tulis berkas, PreToolUse Claude Code (Write/Edit/MultiEdit), pre_tool_call Hermes (write_file/patch), dan PreToolUse
+   Antigravity (write_to_file dan kawannya, sejak 2026-11-13): tolak tulisan ke vault kalau teks barunya memuat nomor dokumen
+   identitas, kata terlarang, atau secret. Daftar kata dan nilai secret dibaca dari file lokal lewat argumen, jadi tidak
+   tertulis di sini. Pola muatan injeksi hanya dicatat ke log penjaga, tidak ditolak.
+2. Pagar shell Hermes (terminal/execute_code, sejak 2026-11-06): tolak perintah yang menulis, menghapus, atau pindah folder
+   ke vault, apa pun isinya, termasuk perintah git yang mengubah isi folder kerjanya. Kode execute_code ditolak kalau menyebut
+   path vault. Claude (Bash/PowerShell) dan run_command Antigravity tidak memakai pagar ini (keputusan pengguna 2026-11-14): di
+   shell mereka yang dijaga hanya vault pribadi (tugas 3).
 3. Folder --protect (vault pribadi, sejak 2026-11-06): tolak setiap tool yang masuk ke hook kalau membaca, menulis, atau
-   mencakup folder itu, termasuk lewat folder induknya. Claude Code tidak memakai opsi ini, karena aturan deny-nya sudah menutup.
+   mencakup folder itu, termasuk lewat folder induknya. Di Claude hanya untuk shell, karena aturan deny Read dan Edit tidak
+   menjangkau perintah shell.
 4. Opsi --worker untuk pekerja oper_kerja.py (sejak 2026-11-07): hanya alat berkas, dan baca maupun tulis dikunci ke folder
    sesinya. Berkas pagar-aktif di folder tugas membuktikan ke oper_kerja.py bahwa hook ini benar-benar berjalan.
-Input JSON hook di stdin; keluar 2 dengan alasan di stderr berarti diblokir, 0 berarti lanjut. Gagal memeriksa juga keluar 2
-(fail closed). Batas: hanya pola yang dikenali. Skrip, path yang dirakit saat jalan, dan cd bertahap lintas panggilan tidak
-terlihat, jadi vault_lint.py tetap cek terakhir untuk tulisan. Membaca vault memori tidak dihalangi."""
+Input JSON hook di stdin. Claude dan Hermes: keluar 2 dengan alasan di stderr berarti diblokir, 0 berarti lanjut.
+Antigravity: selalu keluar 0 dengan JSON decision. Gagal memeriksa berarti ditolak (fail closed), kecuali perintah shell Claude
+dan Antigravity, yang dibiarkan lewat dan dicatat sebagai galat di log penjaga, supaya pengurai yang gagal tidak mengunci shell.
+Batas: hanya pola yang dikenali. Path yang dirakit saat jalan dan cd bertahap lintas panggilan tidak terlihat, jadi
+vault_lint.py tetap cek terakhir untuk tulisan. Membaca vault memori tidak dihalangi."""
 import os
 import re
 import sys
@@ -30,6 +36,19 @@ NOMOR = re.compile(r"(?<!\d)\d{16}(?!\d)")       # NIK dan nomor KK: 16 digit (N
 PLACEHOLDER = ("<", "[", "$", "{", "*", ".", "%")  # API_KEY=<kunci>, TOKEN: [DISENSOR], ${VAR} bukan secret
 WRITE_TOOLS = ("Write", "Edit", "MultiEdit", "write_file", "patch")  # Claude Code, lalu Hermes
 SHELL_TOOLS = ("terminal", "execute_code")  # Hermes
+SHELL_LAIN = ("Bash", "PowerShell", "run_command")  # Claude dan Antigravity: di shell hanya vault pribadi yang dijaga (2026-11-14)
+GIT_TREE = {"checkout", "reset", "restore", "clean", "rm", "mv", "stash", "merge", "pull", "rebase", "apply", "am",
+            "cherry-pick", "revert", "switch"}   # subperintah git yang mengubah isi folder kerja
+# Antigravity (riset 2026-11-13, M6): nama alat IDE dan CLI, dan argumen path-nya (dokumentasi hooks Antigravity, uji agy)
+AGY_TULIS = ("write_file", "edit_file", "write_to_file", "replace_file_content", "multi_replace_file_content")
+AGY_PATH = ("Path", "TargetFile", "AbsolutePath", "FilePath", "DirectoryPath", "SearchDirectory", "SearchPath")
+# Pemanggilan tulis berkas di kode yang dijalankan langsung (python -c, heredoc, node -e), dipakai penjaga_repo untuk bidang
+# penegakan. String .replace( sengaja tidak termasuk
+WRITE_API = re.compile(r"""open\([^)\n]*,\s*(?:mode\s*=\s*)?['"][^'"\n]*[wax+]|\.write_(?:text|bytes)\(|(?<!stdout)(?<!stderr)\.write\("""
+                       r"""|shutil\.(?:move|copy\w*|rmtree)\(|os\.(?:remove|unlink|rename|replace|rmdir|removedirs|makedirs|mkdir)\("""
+                       r"""|\.(?:unlink|rmdir|touch|mkdir|rename)\(|fs\.(?:write|append|unlink|rm|rename|copy|mkdir)\w*\("""
+                       r"""|(?i:set-content|add-content|out-file|new-item|remove-item|move-item|copy-item|rename-item|clear-content)"""
+                       r"""|(?i:writeall\w*|appendall\w*)\(""")
 V4A_FILE = re.compile(r"(?m)^\*\*\*[ \t]*(?:Add[ \t]+File|Update[ \t]+File|Delete[ \t]+File|Move[ \t]+File|Move[ \t]+to):[ \t]*(.+?)[ \t\r]*$")  # sama longgarnya dengan pengurai patch Hermes
 DRIVE_RELATIVE = re.compile(r"^[a-zA-Z]:(?![\\/])")  # C:a.md: relatif ke folder aktif drive itu, bukan ke folder sesi
 WORKER_TOOLS = ("read_file", "write_file", "patch", "search_files")  # toolset file Hermes
@@ -76,14 +95,52 @@ def invisible(text):
         found[key] = found.get(key, 0) + 1
     return ", ".join(f"{k} ×{n}" for k, n in found.items())
 
+# Muatan injeksi di teks yang akan menjadi memori tepercaya (riset 2026-11-13, M5). Sempit dan hanya dilaporkan: halaman
+# yang membahas injeksi wajar memuatnya. "system prompt" dan placeholder <user> sengaja tidak termasuk, karena dipakai wajar.
+INJEKSI = (
+    ("instruksi yang ditujukan ke agent", re.compile(
+        r"(?i)\b(?:ignore|disregard|forget)\s+(?:all\s+|any\s+|the\s+)?(?:previous|prior|above|earlier|preceding)\s+"
+        r"(?:instructions?|prompts?|rules?|messages?)|\babaikan\s+(?:semua\s+|seluruh\s+)?(?:instruksi|perintah|aturan|pesan)\s+"
+        r"(?:sebelumnya|di\s+atas|sebelum\s+ini)|\byou\s+are\s+now\s+(?:a|an|in)\b|\b(?:kamu|anda)\s+sekarang\s+adalah\b|"
+        r"\b(?:new|updated)\s+instructions?\s*:|\binstruksi\s+baru\s*:|\bdo\s+not\s+(?:tell|inform)\s+the\s+user\b|"
+        r"\bjangan\s+(?:beri\s+tahu|bilang|kasih\s+tahu)\s+(?:pengguna|user)\b")),
+    ("tag peran atau percakapan palsu", re.compile(
+        r"(?im)<\|im_(?:start|end)\|>|\[/?INST\]|<</?SYS>>|</?(?:system|assistant|human|system-reminder|function_results|"
+        r"tool_result)>|^\s*(?:Human|Assistant|System)\s*:\s")),
+    ("sintaks pemanggilan tool", re.compile(
+        r"(?i)</?function_calls>|<invoke\s+name=|</?tool_call>|\"tool_calls\"\s*:|antml:|\"function\"\s*:\s*\{\s*\"name\"")),
+)
+URL_PARAM = re.compile(r"https?://[^\s)>`\"'\]]+\?([^\s)>`\"'\]#]+)")
+PARAM_WAJAR = re.compile(r"(?i)^(?:v|t|list|index|si|usp|page|lang|hl|tab|ref|feature|pp|utm_\w+)$")  # YouTube, Drive, utm
+
+def injeksi(text):
+    """Pola muatan injeksi sebagai [(kategori, nomor baris pertama)]: instruksi yang ditujukan ke agent, tag peran palsu,
+    sintaks pemanggilan tool, dan URL dengan parameter di luar yang lazim (jalur kirim data keluar). Peracunan memori lewat
+    Ingest dan Compile (MINJA, Unit 42), jadi dilaporkan, bukan ditolak."""
+    found = []
+    for kategori, pola in INJEKSI:
+        m = pola.search(text)
+        if m:
+            found.append((kategori, text.count("\n", 0, m.start()) + 1))
+    for m in URL_PARAM.finditer(text):
+        nama = [kv.split("=", 1)[0] for kv in re.split(r"[&;]", m.group(1)) if "=" in kv]
+        if any(not PARAM_WAJAR.match(n) for n in nama):
+            found.append(("URL berparameter", text.count("\n", 0, m.start()) + 1))
+            break
+    return found
+
+def folder_log():
+    """Folder log keputusan penjaga: PENJAGA_LOG, atau Riwayat Perckapan/penjaga/ di workspace (lokal, tidak masuk git)."""
+    sini = os.path.dirname(os.path.abspath(__file__))
+    return os.environ.get("PENJAGA_LOG") or os.path.join(os.path.dirname(sini), "Riwayat Perckapan", "penjaga")
+
 def catat_keputusan(penjaga, agen, keputusan, aturan, alat="", target="", galat=""):
-    """Satu baris JSONL per penolakan atau galat penjaga, untuk jejak audit dan tanda percobaan memutar (riset 2026-11-13,
-    langkah C10). Berkasnya per bulan di folder PENJAGA_LOG, bawaannya Riwayat Perckapan/penjaga/ di workspace (lokal,
-    tidak masuk git). Isi yang ditolak tidak pernah dicatat, hanya kategori aturan dan path-nya. Gagal mencatat tidak
-    mengubah keputusan penjaga."""
+    """Satu baris JSONL per penolakan, laporan, atau galat penjaga, untuk jejak audit dan tanda percobaan memutar (riset
+    2026-11-13, langkah C10). Berkasnya per bulan di folder_log(). Isi yang ditolak tidak pernah dicatat, hanya kategori
+    aturan dan path-nya. Gagal mencatat tidak mengubah keputusan penjaga."""
     try:
         sini = os.path.dirname(os.path.abspath(__file__))
-        folder = os.environ.get("PENJAGA_LOG") or os.path.join(os.path.dirname(sini), "Riwayat Perckapan", "penjaga")
+        folder = folder_log()
         with open(os.path.join(sini, penjaga + ".py"), "rb") as f:
             skrip = hashlib.sha256(f.read()).hexdigest()[:12]
         baris = {"waktu": time.strftime("%Y-%m-%dT%H:%M:%S"), "penjaga": penjaga, "agen": agen, "keputusan": keputusan,
@@ -199,6 +256,13 @@ def shell_touches(hook, folders):
                   or (verb == "find" and ("-delete" in low or low & WRITE_VERBS)))
         hit = [t for t in map(clean, outs) if not t.startswith("&") and t.lower() not in NULL_SINKS]
         hit += paths if writes or moves else []
+        if verb == "git":   # perintah git yang mengubah isi folder kerja repo (-C <folder> atau folder dasar)
+            gargs, gbase = list(args), base
+            while gargs and gargs[0].startswith("-"):
+                gbase = os.path.join(base, GIT_BASH.sub(r"\1:/", gargs[1])) if gargs[0] == "-C" and len(gargs) > 1 else gbase
+                gargs = gargs[2:] if gargs[0] in ("-C", "-c") and len(gargs) > 1 else gargs[1:]
+            if gargs and gargs[0] in GIT_TREE:
+                found += touches(gbase, base, folders)
         if ((writes and not paths) or any(UNRESOLVED.search(t) for t in hit)
                 or (verb in SHELL_WRAPPERS and WRITE_WORD.search(" ".join(args)))):
             found += named + touches(".", base, folders)  # targetnya tidak terbaca, jadi cukup folder itu disebut
@@ -244,7 +308,7 @@ def opened(hook, folders):
     tool, base = hook.get("tool_name"), str(hook.get("cwd") or os.getcwd())
     texts = [] if tool in WRITE_TOOLS else leaves(ti)
     found = [f for f in folders if any(opens(t, f) for t in texts)]
-    if tool == "terminal":
+    if tool in ("terminal", *SHELL_LAIN):
         pieces = [w for words, outs in shell_segments(str(ti.get("command") or "")) for w in words + outs]
         paths = [clean(w) for w in pieces if not w.startswith("-") and not WINDOWS_SWITCH.fullmatch(w)]
     elif tool == "execute_code":
@@ -290,22 +354,59 @@ def worker_refusal(hook, folder):
         return "path pencarian harus satu folder atau berkas yang ada di folder kerja"
     return None
 
+def dari_antigravity(hook):
+    """Payload PreToolUse Antigravity ({toolCall: {name, args}, workspacePaths}) dalam bentuk internal penjaga (riset M6):
+    alat tulis menjadi Write dengan isi tulisannya saja (bukan teks lama TargetContent di potongan pengganti), run_command
+    tetap run_command dengan folder Cwd-nya, dan alat lain dinilai sebagai alat baca beserta semua argumennya."""
+    call = hook.get("toolCall") or {}
+    name, args = call.get("name"), call.get("args") or {}
+    base = str(args.get("Cwd") or next(iter(hook.get("workspacePaths") or []), None) or os.getcwd())
+    path = next((str(args[k]).strip().strip('"') for k in AGY_PATH if args.get(k)), None)
+    if name in AGY_TULIS:
+        potong = [c.get("ReplacementContent") for c in args.get("ReplacementChunks") or [] if isinstance(c, dict)]
+        isi = [args.get(k) for k in ("CodeContent", "Content", "content", "ReplacementContent")] + potong
+        return {"tool_name": "Write", "cwd": base, "tool_input": {"file_path": path, "content": "\n".join(str(x) for x in isi if x)}}
+    if name == "run_command":
+        return {"tool_name": "run_command", "cwd": base, "tool_input": {"command": str(args.get("CommandLine") or "")}}
+    return {"tool_name": name or "?", "cwd": base, "tool_input": dict(args, path=path) if path else dict(args)}
+
+def inline_write(command, folder):
+    """Kode yang dijalankan langsung (python -c, heredoc, node -e, skrip PowerShell) yang menyebut folder ini dan memuat
+    pemanggilan tulis berkas. Path yang dirakit saat jalan tidak terbaca, jadi cukup keduanya ada di teks perintah."""
+    return mentions(command, folder) and WRITE_API.search(command) is not None
+
+def keluar(fmt, keputusan, alasan=""):
+    """Kode keluar dan keluaran satu keputusan dalam bentuk yang dibaca platformnya. Claude dan Hermes: tolak berarti keluar 2
+    dengan alasan di stderr. Antigravity: selalu keluar 0 dengan JSON decision di stdout (ASCII, aman untuk konsol mana pun)."""
+    if fmt == "antigravity":
+        print(json.dumps({"decision": keputusan, **({"reason": alasan} if alasan else {})}))
+        return 0
+    if keputusan == "deny":
+        print(alasan, file=sys.stderr)
+        return 2
+    return 0
+
 def main():
     sys.stderr.reconfigure(encoding="utf-8")
-    p = argparse.ArgumentParser(description="Hook sebelum tool jalan: tolak tulisan ke vault yang memuat data pribadi atau secret, tulisan lewat shell Hermes, dan semua akses ke folder --protect.")
+    p = argparse.ArgumentParser(description="Hook sebelum tool jalan: tolak tulisan ke vault yang memuat data pribadi atau secret, "
+                                            "tolak tulisan ke vault lewat shell Hermes, dan tolak semua akses ke folder --protect.")
     p.add_argument("--vault", required=True, help="Folder vault yang dijaga")
     p.add_argument("--words", help="File daftar kata terlarang (lokal, tidak di-commit)")
     p.add_argument("--secrets-from", action="append", default=[], help="File konfigurasi yang nilai secret-nya ikut dicari (boleh diulang)")
     p.add_argument("--protect", action="append", default=[], help="Folder yang tidak boleh dibaca atau ditulis sama sekali, misalnya vault pribadi (boleh diulang)")
     p.add_argument("--worker", action="store_true", help="Pekerja oper_kerja.py: hanya alat berkas, dan hanya di folder sesinya")
+    p.add_argument("--format", choices=("claude", "hermes", "antigravity"),
+                   help="Bentuk payload dan keputusan. Bawaannya dikenali dari payload: toolCall berarti Antigravity, pre_tool_call berarti Hermes")
     a = p.parse_args()  # argumen salah: argparse keluar dengan kode 2, jadi tetap diblokir
-    agen, tool = "?", None
+    fmt, tool = a.format or "claude", None
     try:
-        hook = json.loads(sys.stdin.buffer.read().decode("utf-8"))
+        hook = json.loads(sys.stdin.buffer.read().decode("utf-8-sig"))
+        fmt = a.format or ("antigravity" if "toolCall" in hook else "hermes" if hook.get("hook_event_name") == "pre_tool_call" else "claude")
+        if fmt == "antigravity":
+            hook = dari_antigravity(hook)
         ti = hook.get("tool_input") or {}
         tool = hook.get("tool_name")
-        agen = "hermes" if hook.get("hook_event_name") == "pre_tool_call" else "claude"
-        tolak = lambda aturan, target="": catat_keputusan("vault_guard", agen, "deny", aturan, tool, target)
+        catat = lambda keputusan, aturan, target="": catat_keputusan("vault_guard", fmt, keputusan, aturan, tool, target)
         folder = session_cwd(hook)
         if folder:
             hook["cwd"] = folder  # path relatif Hermes berarti relatif ke folder sesi
@@ -314,42 +415,45 @@ def main():
                 pathlib.Path(folder).parent.joinpath("pagar-aktif").touch()
             refused = worker_refusal(hook, folder)
             if refused:
-                print(f"Ditolak penjaga vault: {refused}. Kerjakan di dalam folder kerja saja.", file=sys.stderr)
-                tolak("pekerja di luar folder kerja")
-                return 2
+                catat("deny", "pekerja di luar folder kerja")
+                return keluar(fmt, "deny", f"Ditolak penjaga vault: {refused}. Kerjakan di dalam folder kerja saja.")
         closed = opened(hook, a.protect)
         if closed:
-            print(f"Ditolak penjaga vault: panggilan {tool} ini membuka atau mencakup {closed[0]}, vault pribadi yang tidak boleh "
-                  "dibaca atau ditulis agent. Kalau mencari di folder induknya, sebut subfolder yang dituju. Jangan mencari jalan lain. "
-                  "Kalau isinya memang dibutuhkan, minta ke pengguna.", file=sys.stderr)
-            tolak("vault pribadi", closed[0])
-            return 2
+            catat("deny", "vault pribadi", closed[0])
+            return keluar(fmt, "deny", f"Ditolak penjaga vault: panggilan {tool} ini membuka atau mencakup {closed[0]}, vault pribadi "
+                          "yang tidak boleh dibaca atau ditulis agent. Kalau mencari di folder induknya, sebut subfolder yang dituju. "
+                          "Jangan mencari jalan lain. Kalau isinya memang dibutuhkan, minta ke pengguna.")
         if tool in SHELL_TOOLS:
             found = shell_touches(hook, [a.vault, *a.protect])
             if found:
-                print(f"Ditolak pagar terminal: panggilan ini menulis, menghapus, atau pindah folder ke {found[0]}. Tulis ke vault "
-                      "memori lewat write_file atau patch supaya isinya diperiksa. Vault pribadi tidak boleh ditulis. Menghapus atau "
-                      "memindahkan berkas vault: minta pengguna dulu. Membaca tetap boleh dengan path absolut, tanpa cd, workdir, "
-                      "atau execute_code.", file=sys.stderr)
-                tolak("pagar terminal", found[0])
-                return 2
-            return 0
+                catat("deny", "pagar terminal", found[0])
+                return keluar(fmt, "deny", f"Ditolak pagar terminal: panggilan ini menulis, menghapus, atau pindah folder ke {found[0]}. "
+                              "Tulis ke vault memori lewat write_file atau patch supaya isinya diperiksa. Vault pribadi tidak boleh "
+                              "ditulis. Menghapus atau memindahkan berkas vault: minta pengguna dulu. Membaca tetap boleh dengan path "
+                              "absolut, tanpa cd, workdir, atau execute_code.")
+            return keluar(fmt, "allow")
+        if tool in SHELL_LAIN:   # Claude dan Antigravity: vault pribadi sudah dicek di atas, tulisan ke vault tidak ditanyakan
+            return keluar(fmt, "allow")
         if tool not in WRITE_TOOLS:
-            return 0
+            return keluar(fmt, "allow")
         hit = [t for t in targets(hook) if inside(t, a.vault)]
         if not hit:
-            return 0
+            return keluar(fmt, "allow")
         found = reasons(new_text(ti), banned_words(a.words), known_secrets(a.secrets_from))
         if found:
-            print(f"Ditolak penjaga vault: tulisan ke {hit[0]} memuat {', '.join(found)}. "
-                  "Ganti bagian itu dengan penanda seperti <nik> atau <nama> (protokol D:\\CODE, bagian Always).", file=sys.stderr)
-            tolak(", ".join(found), hit[0])   # kategori saja, bukan teks yang ditolak
-            return 2
-        return 0
+            catat("deny", ", ".join(found), hit[0])   # kategori saja, bukan teks yang ditolak
+            return keluar(fmt, "deny", f"Ditolak penjaga vault: tulisan ke {hit[0]} memuat {', '.join(found)}. "
+                          "Ganti bagian itu dengan penanda seperti <nik> atau <nama> (protokol D:\\CODE, bagian Always).")
+        pola = injeksi(new_text(ti))   # dilaporkan ke log, tidak ditolak (riset 2026-11-13, M5)
+        if pola:
+            catat("lapor", "pola injeksi: " + ", ".join(sorted({k for k, _ in pola})), hit[0])
+        return keluar(fmt, "allow")
     except Exception as e:  # gagal berarti tolak (fail closed), bukan diam-diam lolos
-        print(f"Penjaga vault gagal memeriksa ({type(e).__name__}: {e}); tulisan ditolak supaya aman.", file=sys.stderr)
-        catat_keputusan("vault_guard", agen, "galat", "gagal memeriksa, ditolak", tool, galat=type(e).__name__)
-        return 2
+        if tool in SHELL_LAIN:   # pengurai shell yang gagal tidak boleh mengunci semua perintah Claude dan Antigravity
+            catat_keputusan("vault_guard", fmt, "galat", "gagal memeriksa shell, dibiarkan lewat", tool, galat=type(e).__name__)
+            return keluar(fmt, "allow")
+        catat_keputusan("vault_guard", fmt, "galat", "gagal memeriksa, ditolak", tool, galat=type(e).__name__)
+        return keluar(fmt, "deny", f"Penjaga vault gagal memeriksa ({type(e).__name__}: {e}); tulisan ditolak supaya aman.")
 
 if __name__ == "__main__":
     sys.exit(main())
