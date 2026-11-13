@@ -15,6 +15,8 @@ import os
 import re
 import sys
 import json
+import time
+import hashlib
 import fnmatch
 import pathlib
 import sqlite3
@@ -73,6 +75,24 @@ def invisible(text):
         key = f"U+{ord(c):04X}"
         found[key] = found.get(key, 0) + 1
     return ", ".join(f"{k} ×{n}" for k, n in found.items())
+
+def catat_keputusan(penjaga, agen, keputusan, aturan, alat="", target="", galat=""):
+    """Satu baris JSONL per penolakan atau galat penjaga, untuk jejak audit dan tanda percobaan memutar (riset 2026-11-13,
+    langkah C10). Berkasnya per bulan di folder PENJAGA_LOG, bawaannya Riwayat Perckapan/penjaga/ di workspace (lokal,
+    tidak masuk git). Isi yang ditolak tidak pernah dicatat, hanya kategori aturan dan path-nya. Gagal mencatat tidak
+    mengubah keputusan penjaga."""
+    try:
+        sini = os.path.dirname(os.path.abspath(__file__))
+        folder = os.environ.get("PENJAGA_LOG") or os.path.join(os.path.dirname(sini), "Riwayat Perckapan", "penjaga")
+        with open(os.path.join(sini, penjaga + ".py"), "rb") as f:
+            skrip = hashlib.sha256(f.read()).hexdigest()[:12]
+        baris = {"waktu": time.strftime("%Y-%m-%dT%H:%M:%S"), "penjaga": penjaga, "agen": agen, "keputusan": keputusan,
+                 "aturan": aturan, "alat": alat or "", "target": target or "", "galat": galat, "skrip": skrip}
+        os.makedirs(folder, exist_ok=True)
+        with open(os.path.join(folder, time.strftime("%Y-%m") + ".jsonl"), "a", encoding="utf-8") as f:
+            f.write(json.dumps(baris, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
 
 def banned_words(path):
     """Satu entri per baris; baris kosong dan baris yang diawali # dilewati."""
@@ -279,10 +299,13 @@ def main():
     p.add_argument("--protect", action="append", default=[], help="Folder yang tidak boleh dibaca atau ditulis sama sekali, misalnya vault pribadi (boleh diulang)")
     p.add_argument("--worker", action="store_true", help="Pekerja oper_kerja.py: hanya alat berkas, dan hanya di folder sesinya")
     a = p.parse_args()  # argumen salah: argparse keluar dengan kode 2, jadi tetap diblokir
+    agen, tool = "?", None
     try:
         hook = json.loads(sys.stdin.buffer.read().decode("utf-8"))
         ti = hook.get("tool_input") or {}
         tool = hook.get("tool_name")
+        agen = "hermes" if hook.get("hook_event_name") == "pre_tool_call" else "claude"
+        tolak = lambda aturan, target="": catat_keputusan("vault_guard", agen, "deny", aturan, tool, target)
         folder = session_cwd(hook)
         if folder:
             hook["cwd"] = folder  # path relatif Hermes berarti relatif ke folder sesi
@@ -292,12 +315,14 @@ def main():
             refused = worker_refusal(hook, folder)
             if refused:
                 print(f"Ditolak penjaga vault: {refused}. Kerjakan di dalam folder kerja saja.", file=sys.stderr)
+                tolak("pekerja di luar folder kerja")
                 return 2
         closed = opened(hook, a.protect)
         if closed:
             print(f"Ditolak penjaga vault: panggilan {tool} ini membuka atau mencakup {closed[0]}, vault pribadi yang tidak boleh "
                   "dibaca atau ditulis agent. Kalau mencari di folder induknya, sebut subfolder yang dituju. Jangan mencari jalan lain. "
                   "Kalau isinya memang dibutuhkan, minta ke pengguna.", file=sys.stderr)
+            tolak("vault pribadi", closed[0])
             return 2
         if tool in SHELL_TOOLS:
             found = shell_touches(hook, [a.vault, *a.protect])
@@ -306,6 +331,7 @@ def main():
                       "memori lewat write_file atau patch supaya isinya diperiksa. Vault pribadi tidak boleh ditulis. Menghapus atau "
                       "memindahkan berkas vault: minta pengguna dulu. Membaca tetap boleh dengan path absolut, tanpa cd, workdir, "
                       "atau execute_code.", file=sys.stderr)
+                tolak("pagar terminal", found[0])
                 return 2
             return 0
         if tool not in WRITE_TOOLS:
@@ -317,10 +343,12 @@ def main():
         if found:
             print(f"Ditolak penjaga vault: tulisan ke {hit[0]} memuat {', '.join(found)}. "
                   "Ganti bagian itu dengan penanda seperti <nik> atau <nama> (protokol D:\\CODE, bagian Always).", file=sys.stderr)
+            tolak(", ".join(found), hit[0])   # kategori saja, bukan teks yang ditolak
             return 2
         return 0
     except Exception as e:  # gagal berarti tolak (fail closed), bukan diam-diam lolos
         print(f"Penjaga vault gagal memeriksa ({type(e).__name__}: {e}); tulisan ditolak supaya aman.", file=sys.stderr)
+        catat_keputusan("vault_guard", agen, "galat", "gagal memeriksa, ditolak", tool, galat=type(e).__name__)
         return 2
 
 if __name__ == "__main__":

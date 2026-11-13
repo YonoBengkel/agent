@@ -245,7 +245,8 @@ def main():
                         help="index: index folder (hanya file yang berubah); search: cari (index disegarkan dulu kalau ada file berubah); status: hitung file yang berubah sejak index terakhir")
     parser.add_argument("target", nargs="?", help="Path folder (untuk index) atau kata kunci (untuk search)")
     parser.add_argument("--folder", type=str, default=None, help="Filter: hanya file di folder induk dengan nama ini")
-    parser.add_argument("--k", type=int, default=5, help="Jumlah halaman yang ditampilkan")
+    # 10 sejak 2026-11-13 (riset C11): di set dev Recall@10 0,81 lawan Recall@5 0,68, MRR tetap 0,65
+    parser.add_argument("--k", type=int, default=10, help="Jumlah halaman yang ditampilkan")
     parser.add_argument("--full", action="store_true", help="index: bangun ulang semua chunk folder ini, abaikan manifest")
     parser.add_argument("--no-refresh", action="store_true", help="search: jangan segarkan index walau ada file yang berubah")
     parser.add_argument("--root", default=VAULT, help='search: folder akar yang dicari, mis. "D:/KULIAH/MATA KULIAH/SEM 5" '

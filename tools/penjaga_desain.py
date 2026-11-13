@@ -158,6 +158,9 @@ def main():
         alasan = alasan_tolak(a.format, json.loads(sys.stdin.buffer.read().decode("utf-8")), a.projects_root, a.vault)
     except Exception as e:
         print(f"Penjaga desain gagal memeriksa ({type(e).__name__}: {e}), tulisan dibiarkan lewat.", file=sys.stderr)
+        g.catat_keputusan("penjaga_desain", a.format, "galat", "gagal memeriksa, dibiarkan lewat", galat=type(e).__name__)
+    if alasan:
+        g.catat_keputusan("penjaga_desain", a.format, "deny", "Referensi Desain belum dibaca")
     if a.format == "antigravity":
         print(json.dumps({"decision": "deny", "reason": alasan} if alasan else {"decision": "allow"}))
         return 0

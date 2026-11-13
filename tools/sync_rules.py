@@ -24,6 +24,24 @@ def read(path):
 
 STAMP = re.compile(r"<!-- translated-from: ([0-9a-f]{12}) -->\n?")
 
+# Batas ukuran per platform (riset 2026-11-13, langkah C7). Batas lunak hanya dicetak sebagai peringatan. Batas keras
+# dihitung sebagai masalah, karena berkas yang lebih besar bisa terpotong tanpa tanda.
+BATAS = {"CLAUDE.md": ("lunak", "baris", 200, "Claude Code menyarankan di bawah 200 baris per berkas"),
+         "AGENTS.md": ("lunak", "baris", 200, "berkas aturan yang dimuat agent, targetnya di bawah 200 baris"),
+         "GEMINI.md": ("keras", "KB", 24, "batas Antigravity 24 KB per berkas")}
+
+def cek_ukuran(path, text):
+    """1 kalau berkas melewati batas keras platformnya, 0 kalau tidak. Batas lunak hanya dicetak."""
+    b = BATAS.get(os.path.basename(path))
+    if not b:
+        return 0
+    jenis, satuan, batas, alasan = b
+    nilai = len(text.splitlines()) if satuan == "baris" else len(text.encode("utf-8")) / 1024
+    if nilai <= batas:
+        return 0
+    print(f"  [{'TERLALU BESAR' if jenis == 'keras' else 'PERINGATAN'}] {path}: {nilai:.0f} {satuan}, {alasan}")
+    return int(jenis == "keras")
+
 def fingerprint(t):
     """Sidik bagian sumber yang diterjemahkan: seluruh file, atau satu heading sampai heading setingkat berikutnya."""
     text, _ = read(t["source"])
@@ -121,7 +139,15 @@ def main():
     a = p.parse_args()
 
     reg = json.load(open(a.registry, encoding="utf-8"))
-    problems = 0
+    problems, diukur = 0, set()
+
+    def ukur(path, text):   # setiap berkas cukup diukur sekali, walau muncul di beberapa entri registry
+        kunci = os.path.normcase(os.path.abspath(path))
+        if kunci in diukur:
+            return 0
+        diukur.add(kunci)
+        return cek_ukuran(path, text)
+
     for s in reg["syncs"]:
         print(f"# {s['name']} (sumber: {s['source']})")
         src, _ = read(s["source"])
@@ -129,6 +155,7 @@ def main():
             print(f"  [UNICODE TAK TERLIHAT] {s['source']}: {bad}. Sumber ini tidak disalin sampai dibersihkan")
             problems += 1
             continue
+        problems += ukur(s["source"], src)
         sp = span(src)
         if not sp:
             print("  [GAGAL] penanda sync tidak ada di sumber")
@@ -150,6 +177,7 @@ def main():
             if bad := vault_guard.invisible(text):
                 print(f"  [UNICODE TAK TERLIHAT] {path}: {bad}")
                 problems += 1
+            problems += ukur(path, text)
             cp = span(text, label)
             if not cp:
                 print(f"  [TANPA PENANDA] {path}: bagian '{label}' tidak ada, tidak disentuh")
@@ -173,6 +201,7 @@ def main():
         note = f" ({t['note']})" if t.get("note") else ""
         try:
             fp = fingerprint(t)
+            problems += ukur(t["source"], read(t["source"])[0])
             text, nl = read(t["mirror"])
         except (OSError, ValueError) as e:
             print(f"  [TIDAK TERJANGKAU] {t['mirror']}: {e}")

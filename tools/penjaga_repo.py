@@ -201,6 +201,9 @@ def main():
             alasan = periksa(command, base, a)
     except Exception as e:
         print(f"Penjaga repo luar gagal memeriksa ({type(e).__name__}: {e}), perintah dibiarkan lewat.", file=sys.stderr)
+        g.catat_keputusan("penjaga_repo", a.format, "galat", "gagal memeriksa, dibiarkan lewat", galat=type(e).__name__)
+    if alasan:   # kategori saja: pesan tolaknya bisa memuat URL repo
+        g.catat_keputusan("penjaga_repo", a.format, "deny", "repo pihak ketiga ke folder proyek")
     if a.format == "antigravity":
         print(json.dumps({"decision": "deny", "reason": alasan} if alasan else {"decision": "allow"}))
         return 0

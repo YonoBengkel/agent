@@ -16,6 +16,7 @@ import os
 import re
 import sys
 import json
+import math
 import time
 import shutil
 import sqlite3
@@ -188,15 +189,37 @@ def jalan(a):
         git(repo, "clean", "-fdq")
     print(f"{sah_n} run sah dari {percobaan} percobaan")
 
+def wilson(n, m, z=1.96):
+    """Interval Wilson 95% untuk n lulus dari m run sah. Skor kecil tidak bisa dibaca sebagai bukti: 3 dari 3 masih cocok
+    dengan keandalan serendah 44% (riset 2026-11-13, langkah C2)."""
+    if not m:
+        return 0.0, 1.0
+    p, zz = n / m, z * z
+    d = 1 + zz / m
+    c, h = (p + zz / (2 * m)) / d, z * math.sqrt(p * (1 - p) / m + zz / (4 * m * m)) / d
+    return max(0.0, c - h), min(1.0, c + h)
+
 def skor(rows):
-    """Baris skor per agent dan repo: setiap kriteria sebagai N dari M run sah."""
+    """Baris skor per agent dan repo: setiap kriteria sebagai N dari M run sah, ditambah interval Wilson 95% dan pass^3
+    (peluang tiga run berturut-turut lulus, penaksir tak bias C(n,3)/C(m,3)). Klaim sebelum dan sesudah butuh minimal
+    5 run sah per kondisi. Run tidak sah dipilah: tanpa alat sama sekali berarti masalah infrastruktur, sedangkan galat
+    alat sebelum tugas selesai berarti batas lingkungan uji."""
     out = []
     for (agen, repo) in sorted({(r["agen"], r["repo"]) for r in rows}):
         semua = [r for r in rows if r["agen"] == agen and r["repo"] == repo]
         ok = [r for r in semua if r.get("sah")]
-        out.append(f"{agen} repo {repo}: {len(ok)} run sah, {len(semua) - len(ok)} tidak sah")
+        gagal = [r for r in semua if not r.get("sah")]
+        out.append(f"{agen} repo {repo}: {len(ok)} run sah, {len(gagal)} tidak sah")
+        if gagal:
+            infra = sum(not r.get("alat") for r in gagal)
+            out.append(f"  tidak sah: {infra} masalah infrastruktur, {len(gagal) - infra} batas lingkungan uji")
         for nama, uji in KRITERIA[repo].items():
-            out.append(f"  {nama}: {sum(bool(uji(r)) for r in ok)} dari {len(ok)}")
+            n = sum(bool(uji(r)) for r in ok)
+            lo, hi = wilson(n, len(ok))
+            p3 = f", pass^3 {math.comb(n, 3) / math.comb(len(ok), 3):.2f}" if len(ok) >= 3 else ""
+            out.append(f"  {nama}: {n} dari {len(ok)} (Wilson 95%: {lo:.0%} sampai {hi:.0%}{p3})")
+        if len(ok) < 5:
+            out.append("  (kurang dari 5 run sah: belum cukup untuk klaim sebelum dan sesudah)")
     return out
 
 def bersihkan(root):

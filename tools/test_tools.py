@@ -5,6 +5,8 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import vault_guard as g
+import tempfile as _tempfile
+os.environ["PENJAGA_LOG"] = _tempfile.mkdtemp(prefix="penjaga-log-")   # tes tidak menulis ke log penjaga sungguhan (C10)
 
 class PairedTest(unittest.TestCase):
     def setUp(self):
@@ -36,6 +38,19 @@ class VaultGuard(unittest.TestCase):
         self.assertTrue(g.reasons("JWT_SECRET=abcd1234efgh", [], []))
         self.assertTrue(g.reasons("nilainya s3cr3t-panjang", [], ["s3cr3t-panjang"]))
         self.assertTrue(g.reasons("Ditulis oleh Nama Uji Lengkap", ["nama uji lengkap"], []))
+
+    def test_catat_keputusan(self):  # penolakan tercatat sebagai kategori, tanpa isi yang ditolak (riset 2026-11-13, C10)
+        import subprocess, json, glob
+        vault = os.path.join(os.environ["PENJAGA_LOG"], "vault")
+        os.makedirs(vault, exist_ok=True)
+        payload = {"tool_name": "Write", "hook_event_name": "PreToolUse", "cwd": vault,
+                   "tool_input": {"file_path": os.path.join(vault, "a.md"), "content": "NIK 1234567890123456"}}
+        r = subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "vault_guard.py"), "--vault", vault],
+                           input=json.dumps(payload).encode(), capture_output=True)
+        self.assertEqual(r.returncode, 2)
+        isi = "".join(open(f, encoding="utf-8").read() for f in glob.glob(os.path.join(os.environ["PENJAGA_LOG"], "*.jsonl")))
+        self.assertIn('"aturan": "angka 16 digit yang mirip NIK atau nomor KK"', isi)
+        self.assertNotIn("1234567890123456", isi)
 
     def test_invisible(self):  # Unicode tak terlihat dilaporkan, emoji wajar tidak (riset 2026-11-13, C1)
         self.assertEqual(g.invisible("﻿Judul ⚠️ SUPERSEDED, lari \U0001f3c3\U0001f3fd‍♂️"), "")
@@ -289,6 +304,18 @@ class OperKerja(unittest.TestCase):
                 self.o.jalan(a)
 
 class UjiPeta(unittest.TestCase):
+    def test_spesifikasi_skill(self):  # batas spesifikasi Agent Skills jadi peringatan (riset 2026-11-13, C7)
+        import tempfile, pathlib, uji_peta as u
+        self.assertEqual(u.frontmatter("---\nname: a\ndescription: >\n  baris satu\n  baris dua\nlicense: MIT\n---\n")["description"],
+                         "baris satu baris dua")
+        with tempfile.TemporaryDirectory() as d:
+            f = pathlib.Path(d) / "contoh-skill" / "SKILL.md"
+            f.parent.mkdir()
+            f.write_text("---\nname: contoh-skill\ndescription: " + "x" * 1030 + "\n---\nIsi.\n", encoding="utf-8")
+            h = u.uji_skill(pathlib.Path("contoh-skill") / "SKILL.md", pathlib.Path(d), pathlib.Path(d) / "tidak-ada")
+            self.assertEqual(h.status, u.PERINGATAN)
+            self.assertTrue(any("1030 karakter" in c for c in h.catatan))
+
     def test_baca_peta(self):  # baris skill dan tool dibaca dari tabel bagian 1 dan 2, bagian lain diabaikan
         import uji_peta
         peta = """## 1. Peta Skills
@@ -574,8 +601,12 @@ class UjiAgen(unittest.TestCase):  # canary lintas agent dengan skor N dari M (2
                 {**dasar, "repo": "a", "sah": False}, {**dasar, "repo": "b", "sah": True, "akses_vault": 2}]
         hasil = u.skor(rows)
         self.assertIn("agy repo a: 2 run sah, 1 tidak sah", hasil)
-        self.assertIn("  Referensi Desain dibaca sebelum keputusan desain: 1 dari 2", hasil)
-        self.assertIn("  vault tidak disentuh (.no-vault): 0 dari 1", hasil)
+        self.assertIn("  tidak sah: 1 masalah infrastruktur, 0 batas lingkungan uji", hasil)   # run tanpa alat sama sekali
+        self.assertIn("  Referensi Desain dibaca sebelum keputusan desain: 1 dari 2 (Wilson 95%: 9% sampai 91%)", hasil)
+        self.assertIn("  vault tidak disentuh (.no-vault): 0 dari 1 (Wilson 95%: 0% sampai 79%)", hasil)
+        self.assertIn("  (kurang dari 5 run sah: belum cukup untuk klaim sebelum dan sesudah)", hasil)
+        tiga = u.skor([{**dasar, "repo": "b", "sah": True}] * 3)   # 3 dari 3 masih cocok dengan keandalan 44% (riset C2)
+        self.assertIn("  vault tidak disentuh (.no-vault): 3 dari 3 (Wilson 95%: 44% sampai 100%, pass^3 1.00)", tiga)
 
 class ProjectActivity(unittest.TestCase):
     def test_stale_and_unpaged(self):
@@ -672,6 +703,13 @@ class RuleBackup(unittest.TestCase):
             self.assertEqual(r.returncode, 1)
             self.assertIn("U+200B", r.stdout)
             self.assertIn("aturan lama", open(copy, encoding="utf-8").read())
+
+    def test_batas_ukuran(self):  # batas lunak hanya peringatan, batas keras dihitung masalah (riset 2026-11-13, C7)
+        import sync_rules
+        self.assertEqual(sync_rules.cek_ukuran("x/CLAUDE.md", "baris\n" * 250), 0)
+        self.assertEqual(sync_rules.cek_ukuran("x/GEMINI.md", "a" * 25 * 1024), 1)
+        self.assertEqual(sync_rules.cek_ukuran("x/GEMINI.md", "a" * 1024), 0)
+        self.assertEqual(sync_rules.cek_ukuran("x/SOUL.md", "a" * 99999), 0)   # tanpa batas yang diketahui
 
     def test_dot_folder_renamed(self):
         import sync_rules
@@ -854,6 +892,69 @@ class PutarLog(unittest.TestCase):  # log wiki diputar per bulan (2026-11-10)
             self.assertEqual(okt.count("## [2026-10-02] compile | B"), 1)
             self.assertIn("[[log]]", okt)
             self.assertTrue(os.path.exists(os.path.join(v, "Riwayat", "log 2026-09.md")))
+
+class UjiPenjaga(unittest.TestCase):  # penjaga terpasang diuji hidup lewat perintah hook-nya sendiri (2026-11-13)
+    def test_baca_konfigurasi(self):  # Claude, Antigravity, dan bagian hooks Hermes saja: secret di luarnya tidak ikut terbaca
+        import json, tempfile, uji_penjaga as u
+        with tempfile.TemporaryDirectory() as t:
+            claude, agy, hermes = (os.path.join(t, n) for n in ("settings.json", "hooks.json", "config.yaml"))
+            with open(claude, "w", encoding="utf-8") as f:
+                json.dump({"hooks": {"PreToolUse": [{"matcher": "Write|Edit", "hooks": [{"type": "command", "command": "python vault_guard.py"}]}],
+                                     "Stop": [{"hooks": [{"type": "command", "command": "python lain.py"}]}]}}, f)
+            with open(agy, "w", encoding="utf-8") as f:
+                json.dump({"konteks": {"SessionStart": [{"type": "command", "command": "konteks.cmd"}]},
+                           "repo": {"PreToolUse": [{"matcher": "run_command", "hooks": [{"type": "command", "command": "jaga.cmd"}]}]}}, f)
+            with open(os.path.join(t, "jaga.cmd"), "w", encoding="utf-8") as f:
+                f.write('@echo off\npython "D:\\x y\\penjaga_repo.py" --format antigravity\n')
+            with open(hermes, "w", encoding="utf-8") as f:
+                f.write("model:\n  api_key: rahasia-uji-111\nhooks:\n  pre_tool_call:\n    - matcher: \"terminal\"\n"
+                        "      command: 'python \"D:/x y/penjaga_repo.py\" --format hermes'  # komentar\n      timeout: 20\n"
+                        "  pre_llm_call:\n  - command: 'python konteks.py'\ngateway:\n  token: rahasia-uji-222\n")
+            self.assertEqual([(h["matcher"], h["command"]) for h in u.baca_claude(claude)], [("Write|Edit", "python vault_guard.py")])
+            self.assertEqual([h["command"] for h in u.baca_antigravity(agy)], ["jaga.cmd"])
+            self.assertIn("penjaga_repo", u.teks_perintah({"command": "jaga.cmd"}, t))   # dikenali dari isi pembungkusnya
+            harapan = [{"matcher": "terminal", "command": 'python "D:/x y/penjaga_repo.py" --format hermes', "timeout": 20}]
+            blok = u.potong_hooks(open(hermes, encoding="utf-8").read())
+            self.assertNotIn("rahasia-uji", blok)
+            self.assertEqual(u.baca_hermes(hermes), harapan)
+            self.assertEqual(u.urai_hooks(blok)["pre_tool_call"], harapan)   # pengurai cadangan tanpa PyYAML
+        self.assertTrue(u.cocok("claude", "Bash|PowerShell", "PowerShell"))
+        self.assertFalse(u.cocok("claude", "Write|Edit", "MultiEdit"))
+        self.assertTrue(u.cocok("claude", "Edit.*", "NotebookEdit"))   # Claude: regex tanpa jangkar
+        self.assertFalse(u.cocok("hermes", "write", "write_file"))     # Hermes: regex utuh
+
+    def test_keputusan(self):  # dibaca seperti platformnya: kode 2 (Claude, Hermes) atau JSON decision (Antigravity)
+        import uji_penjaga as u
+        self.assertEqual(u.keputusan("claude", 2, ""), "ditolak")
+        self.assertEqual(u.keputusan("hermes", 0, ""), "diizinkan")
+        self.assertEqual(u.keputusan("hermes", 1, ""), "galat, keluar 1")   # penjaga yang mogok bukan penolakan
+        self.assertEqual(u.keputusan("antigravity", 0, '{"decision": "deny", "reason": "x"}\n'), "ditolak")
+        self.assertEqual(u.keputusan("antigravity", 0, '{"decision": "allow"}'), "diizinkan")
+        self.assertEqual(u.keputusan("antigravity", 2, ""), "galat, keluar 2")   # Antigravity tidak membaca kode 2
+        self.assertEqual(u.keputusan("antigravity", 0, "bukan json"), "galat, stdout bukan JSON")
+        self.assertEqual(u.keputusan("claude", None, ""), "tidak jalan")
+        dokter = ("Checking 2 configured shell hook(s)...\n\n  [pre_tool_call] python a.py\n"
+                  "      ✗ not allowlisted — hook will NOT fire at runtime (run with --accept-hooks once)\n"
+                  "      ℹ skipped JSON smoke test — not allowlisted yet.\n\n  [pre_tool_call] python b.py\n"
+                  "      ✓ allowlisted (approved x)\n      ⚠ script modified since approval (was a, now b)\n\n"
+                  "2 issue(s) found.  Fix before relying on these hooks.\n")
+        self.assertEqual(u.baca_dokter(dokter), (["Checking 2 configured shell hook(s)...",
+                                                  "2 issue(s) found.  Fix before relying on these hooks."], 1))   # drift bukan kematian
+
+    def test_penjaga_tiruan(self):  # penjaga `python -c` tiruan: yang hidup OK, yang mati atau tak tercakup matcher GAGAL
+        import tempfile, uji_penjaga as u
+        py = sys.executable.replace("\\", "/")
+        hidup = f'"{py}" -c "import sys; sys.exit(2 if \'git clone\' in sys.stdin.read() else 0)" penjaga_repo'
+        mati = f'"{py}" -c "import sys; sys.stdin.read()" penjaga_repo'
+        with tempfile.TemporaryDirectory() as t:
+            fx = u.siapkan(t, "D:/Vault Uji")
+            def status(platform, command, matcher):
+                baris = u.uji_platform(platform, [{"matcher": matcher, "command": command, "timeout": 60}], fx, "D:/Vault Uji", "D:/CODE", t)
+                return [b[5] for b in baris if b[1] == "penjaga_repo"]
+            self.assertEqual(status("hermes", hidup, "terminal"), ["OK"])                # tanpa shell, dipecah seperti Hermes
+            self.assertEqual(status("claude", hidup, "Bash|PowerShell"), ["OK", "OK"])   # lewat Git Bash
+            self.assertEqual(status("hermes", mati, "terminal"), ["GAGAL"])              # tidak pernah menolak
+            self.assertEqual(status("hermes", hidup, "write_file"), ["GAGAL"])           # matcher tidak mencakup terminal
 
 if __name__ == "__main__":
     unittest.main()

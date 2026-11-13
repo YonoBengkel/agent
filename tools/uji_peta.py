@@ -63,11 +63,14 @@ def baca_peta(teks):
 
 def frontmatter(teks):
     m = re.match(r"---\r?\n(.*?)\r?\n---", teks, re.S)
-    data = {}
+    data, kunci = {}, None
     for l in (m.group(1).splitlines() if m else []):
         if re.match(r"^[A-Za-z_-]+:", l):
-            k, v = l.split(":", 1)
-            data[k.strip()] = v.strip().strip("'\"")
+            kunci, v = l.split(":", 1)
+            kunci = kunci.strip()
+            data[kunci] = v.strip().strip("'\"")
+        elif kunci and l[:1] in (" ", "\t") and l.strip():   # nilai YAML berlipat berlanjut di baris berindentasi
+            data[kunci] = (data[kunci].lstrip(">|-").strip() + " " + l.strip()).strip()
     return data
 
 
@@ -99,6 +102,13 @@ def uji_skill(path, akar_skill, akar_claude):
         h.turun(GAGAL, "frontmatter tanpa name atau description")
     elif fm["name"] != f.parent.name:
         h.turun(PERINGATAN, f"name '{fm['name']}' beda dengan folder '{f.parent.name}'")
+    # Batas spesifikasi Agent Skills (agentskills.io, riset 2026-11-13 langkah C7). Platform bisa melewatkan skill yang melanggarnya.
+    if fm.get("name") and (len(fm["name"]) > 64 or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", fm["name"])):
+        h.turun(PERINGATAN, f"name '{fm['name']}' di luar spesifikasi: huruf kecil, angka, dan tanda hubung, maksimal 64")
+    if len(fm.get("description", "")) > 1024:
+        h.turun(PERINGATAN, f"deskripsi {len(fm['description'])} karakter, batas spesifikasi 1024")
+    if len(teks.splitlines()) >= 500:
+        h.turun(PERINGATAN, f"SKILL.md {len(teks.splitlines())} baris, spesifikasi menyarankan di bawah 500")
     for p in sorted(set(RELATIF.findall(teks))):
         p = p.rstrip(".,):")
         if "<" not in p and "*" not in p and "…" not in p and "..." not in p and not (f.parent / p).exists():
@@ -183,6 +193,9 @@ def uji_tool(nama, vault, berat):
         elif nama == "penjaga_repo.py":
             k, o = jalan([py, "-B", "tools/penjaga_repo.py", "--help"])
             ok, pesan = k == 0 and "repo-luar" in o, "--help. Logikanya diuji test_tools.py, jalur hook sungguhan diuji di sesi"
+        elif nama == "uji_penjaga.py":
+            k, o = jalan([py, "-B", "tools/uji_penjaga.py", "--help"])
+            ok, pesan = k == 0 and "hermes-config" in o, "--help. Logikanya diuji test_tools.py, uji hidupnya butuh path konfigurasi hook"
         elif nama == "medusa":
             k, o = jalan([AKAR / "tools" / "medusa-venv" / "Scripts" / "medusa.exe", "--version"])
             ok, pesan = k == 0 and "MEDUSA" in o, "hanya --version. Pindaian penuh berat untuk RAM mesin ini"
