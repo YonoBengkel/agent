@@ -89,9 +89,14 @@ class VaultGuard(unittest.TestCase):
             return "deny" if kode == 2 else "allow"
         lolos = [("Bash", f'echo x > "{v}/a.md"'), ("Bash", f'cd "{v}" && echo x > a.md'), ("Bash", f'git -C "{v}" checkout -- .'),
                  ("PowerShell", f'Set-Content -Path "{self.V}\\a.md" -Value x'), ("Bash", f'ls "{v}"'),
-                 ("Bash", f'python tools/vault_lint.py "{v}" > "$TEMP/lint.txt"'), ("PowerShell", f'Get-Content "{self.V}\\a.md"')]
+                 ("Bash", f'python tools/vault_lint.py "{v}" > "$TEMP/lint.txt"'), ("PowerShell", f'Get-Content "{self.V}\\a.md"'),
+                 # di Git Bash "/" adalah akar folder Git, dan operator / di kode Python bukan path (salah tolak 2026-11-19)
+                 ("Bash", "python - <<'EOF'\nimport pathlib\nprint(pathlib.Path('D:/CODE') / 'skills')\nEOF"), ("Bash", "ls /"),
+                 ("Bash", "cat <<'EOF'\nmemakai operator /.\nEOF")]
         tolak = [("Bash", f'cat "{pv}/a.md"'), ("PowerShell", f'Get-Content "{P}\\a.md"'), ("Bash", 'ls "/d/Pribadi Uji"'),
-                 ("Bash", "ls D:/"), ("PowerShell", f'Get-ChildItem "{P}" -Recurse'), ("Bash", f"python -c \"open(r'{pv}/a.md').read()\"")]
+                 ("Bash", "ls D:/"), ("PowerShell", f'Get-ChildItem "{P}" -Recurse'), ("Bash", f"python -c \"open(r'{pv}/a.md').read()\""),
+                 ("PowerShell", "Get-ChildItem / -Recurse"), ("Bash", 'for d in C D; do ls "$d:"; done'),   # di PowerShell "/" akar drive
+                 ("Bash", "find ../.. -name a.md")]   # path relatif tetap diperiksa: dari D:/CODE naik ke akar drive
         self.assertEqual([putus(*k) for k in lolos], ["allow"] * len(lolos))
         self.assertEqual([putus(*k) for k in tolak], ["deny"] * len(tolak))   # D:/ ikut: induk vault pribadi, sama dengan Hermes
 
@@ -397,6 +402,21 @@ class UjiPeta(unittest.TestCase):
         self.assertEqual(uji_peta.baca_peta(peta), ([("contoh", "contoh/SKILL.md")], ["alat.py"]))
         self.assertEqual(uji_peta.frontmatter("---\nname: contoh\ndescription: >\n  uji\n---\n# isi")["name"], "contoh")
         self.assertEqual(uji_peta.uji_tool("alat-baru.py", ".", False).status, uji_peta.GAGAL)  # tool tanpa uji asap ditolak
+
+    def test_sub_peta(self):  # baris yang path-nya bukan SKILL.md dibuka sebagai sub-peta (keputusan Ilham 2026-11-19)
+        import tempfile, pathlib, uji_peta as u
+        with tempfile.TemporaryDirectory() as d:
+            akar = pathlib.Path(d)
+            (akar / "animate").mkdir()
+            (akar / "animate" / "animate.md").write_text(
+                "## 1. Skill animasi\n| Nama | Kapan | Path | Operator |\n|---|---|---|---|\n"
+                "| `animate` | x | `animate/SKILL.md` | U |\n| `animate-expo` | x | `animate-expo/SKILL.md` | U |\n",
+                encoding="utf-8")
+            skill, sub = u.buka_sub_peta([("animate", "animate/animate.md"), ("lain", "lain/SKILL.md"),
+                                          ("hilang", "hilang/hilang.md")], akar)
+            self.assertEqual(skill, [("animate", "animate/SKILL.md"), ("animate-expo", "animate-expo/SKILL.md"),
+                                     ("lain", "lain/SKILL.md")])
+            self.assertEqual([(n, h.status) for n, h in sub], [("animate", u.LULUS), ("hilang", u.GAGAL)])
 
 class SessionContext(unittest.TestCase):
     def test_project_name(self):

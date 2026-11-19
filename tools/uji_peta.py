@@ -3,6 +3,7 @@
 Skill: SKILL.md ada, frontmatter punya name dan description, name sama dengan nama folder, path yang dirujuk ada,
 skrip Python dan JavaScript lolos cek sintaks, uji bawaan skill (test_*.py) lulus, dan skill lumbung tidak menyebut
 alat khusus satu platform. Salinan bawaan Claude dibandingkan, dan skill di lumbung yang belum masuk peta dilaporkan.
+Baris skill yang path-nya bukan SKILL.md adalah sub-peta: tabel bagian 1 di dalamnya ikut dibaca dan diuji.
 Tool: uji asap per tool. Tool di peta yang belum punya uji asap di sini dilaporkan GAGAL, jadi setiap baris baru di
 peta menuntut ujinya ditulis lebih dulu.
 
@@ -59,6 +60,29 @@ def baca_peta(teks):
         else:
             tool.append(nama[0])
     return skill, tool
+
+
+def buka_sub_peta(skill, akar_skill):
+    """Baris skill yang path-nya bukan SKILL.md menunjuk ke sub-peta, misalnya `animate/animate.md`. Peta utama cukup
+    satu baris per kelompok, rinciannya dibaca saat perlu (keputusan Ilham 2026-11-19). Skill di tabel bagian 1
+    sub-peta diuji seperti skill di peta utama. Mengembalikan daftar skill yang sudah diurai dan hasil per sub-peta."""
+    hasil, sub = [], []
+    for nama, path in skill:
+        f = akar_skill / path
+        if f.name == "SKILL.md":
+            hasil.append((nama, path))
+            continue
+        h = Hasil()
+        if not f.exists():
+            h.turun(GAGAL, f"sub-peta {path} tidak ada")
+        else:
+            anak, _ = baca_peta(f.read_text(encoding="utf-8"))
+            if not anak:
+                h.turun(GAGAL, f"sub-peta {path} tanpa tabel skill di bagian 1")
+            hasil += anak
+            h.catatan.append(f"{len(anak)} skill di {path}")
+        sub.append((nama, h))
+    return list(dict.fromkeys(hasil)), sub
 
 
 def frontmatter(teks):
@@ -231,7 +255,8 @@ def main():
     a = p.parse_args()
     skill, tool = baca_peta(pathlib.Path(a.peta).read_text(encoding="utf-8"))
     akar_skill, akar_claude = AKAR / "skills", pathlib.Path.home() / ".claude" / "skills"
-    baris = []
+    skill, sub = buka_sub_peta(skill, akar_skill)
+    baris = [("sub-peta", nama, h) for nama, h in sub]
     for nama, path in skill:
         h = uji_skill(path, akar_skill, akar_claude)
         baris.append(("skill", nama, h))

@@ -311,6 +311,8 @@ def opened(hook, folders):
     if tool in ("terminal", *SHELL_LAIN):
         pieces = [w for words, outs in shell_segments(str(ti.get("command") or "")) for w in words + outs]
         paths = [clean(w) for w in pieces if not w.startswith("-") and not WINDOWS_SWITCH.fullmatch(w)]
+        if tool == "Bash":   # di Git Bash "/", "/.", dan "/.." adalah akar folder Git, bukan akar drive. Operator /
+            paths = [p for p in paths if not (p.startswith("/") and not p.strip("/."))]   # di heredoc juga kata (2026-11-19)
     elif tool == "execute_code":
         paths = []
     else:
