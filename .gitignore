@@ -7,6 +7,8 @@
 /*
 !/.gitignore
 !/README.md
+!/PETA_SKILLS_TOOLS.md
+!/PETA_PERAWATAN.md
 !/tools/
 /tools/*
 !/tools/rag_engine.py
