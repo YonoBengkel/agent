@@ -73,6 +73,10 @@ NULL_SINKS = {"/dev/null", "/dev/stdout", "/dev/stderr", "nul", "$null"}
 UNRESOLVED = re.compile(r"[$%`]|\{\}")  # target yang baru diketahui saat jalan
 PATH_END = r"(?=$|[\s;|&),\]}+])"  # akhir path sesudah kutipnya dilepas
 WINDOWS_SWITCH = re.compile(r"/[a-zA-Z]")  # dir /b dan cmd /c, bukan /d milik Git Bash
+HEREDOC = re.compile(r"""(?<!<)<<-?[ \t]*(['"]?)([A-Za-z_][\w.-]*)\1(?![\w.-])""")  # <<EOF dan <<-'EOF', bukan <<< atau 1 << 2
+# Perintah yang menjalankan isi heredoc atau memakainya sebagai argumen, jadi isinya tetap dinilai per kata (2026-11-20)
+PEMAKAI_ISI = SHELL_WRAPPERS | {"eval", "source", "xargs", "read", "mapfile", "readarray", "parallel", "while", "for", "until"}
+SUBST_PESAN = re.compile(r"""(?:^|\s)(?:-m|--message)(?:=|\s+)"?\$\(cat\s+<<""")  # git commit -m "$(cat <<'EOF' ...)"
 TAK_TERLIHAT = re.compile("[​-‏⁠-⁤﻿‪-‮⁦-⁩"
                           "\U000e0000-\U000e007f\U000e0100-\U000e01ef︀-️]")  # zero-width, bidi, blok tag, selektor variasi
 EMOJI = re.compile("[☀-➿\U0001f000-\U0001faff️]")
@@ -232,6 +236,62 @@ def shell_segments(command):
     segments.append((words, outs))
     return segments
 
+def tanpa_heredoc(command):
+    """Perintah Bash tanpa isi heredoc-nya, supaya isi yang hanya masuk ke stdin perintah biasa (git commit -F -, cat > x,
+    python -) atau menjadi pesan git commit -m "$(cat <<'EOF' ...)" tidak dinilai per kata (keputusan pengguna 2026-11-20).
+    Isi tetap dinilai kalau perintah di luarnya bisa menjalankan isi itu atau memakainya sebagai argumen: shell, eval,
+    source, titik, xargs, read dan loop, atau substitusi $(...), `...`, dan <(...) lain. << di dalam kutip dan heredoc tanpa
+    baris penutup tidak dianggap heredoc. Cek path utuh di opens() tetap memakai teks lengkap."""
+    lines, keep, state, i, ada = command.split("\n"), [], [], 0, False
+    while i < len(lines):
+        line, delims, j = lines[i], [], 0
+        keep.append(line)
+        i += 1
+        while j < len(line):
+            c, top = line[j], state[-1] if state else None
+            if top == "'":
+                if c == "'":
+                    state.pop()
+            elif c == "\\":
+                j += 1
+            elif c == "$" and line[j + 1:j + 2] == "(":
+                state.append("(")
+                j += 1
+            elif c == ")" and top == "(":
+                state.pop()
+            elif c == '"':
+                if top == '"':
+                    state.pop()
+                else:
+                    state.append('"')
+            elif c == "'" and top != '"':
+                state.append("'")
+            elif c == "<" and top != '"' and (m := HEREDOC.match(line, j)):
+                delims.append(m.group(2))
+                j = m.end()
+                continue
+            j += 1
+        for d in delims:   # isinya mulai di baris berikutnya dan berakhir di baris yang hanya berisi penutupnya
+            end = next((k for k in range(i, len(lines)) if lines[k].strip(" \t\r") == d), None)
+            if end is None:
+                break
+            i, ada = end + 1, True
+    if not ada:
+        return command
+    rest = "\n".join(keep)
+    def nama(w):
+        return re.sub(r"\.exe$", "", re.split(r"[\\/]", clean(w))[-1].lower())
+    verbs = []
+    for words, _ in shell_segments(rest):
+        if any(nama(w) in PEMAKAI_ISI for w in words):
+            return command
+        while words and (words[0].lower() in SHELL_PREFIX or words[0].startswith("-") or re.match(r"\w+=", words[0])):
+            words = words[1:]
+        verbs += words[:1]
+    if "." in map(clean, verbs) or re.search(r"\$\(|`|<\(", SUBST_PESAN.sub(" ", rest)):
+        return command
+    return rest
+
 def shell_touches(hook, folders):
     """Folder terjaga yang ditulis, dihapus, atau dituju cd oleh panggilan terminal/execute_code. cd dan workdir ikut ditolak
     karena terbawa ke panggilan berikutnya, sedangkan cwd di payload hook adalah folder proses, bukan folder sesi."""
@@ -309,7 +369,10 @@ def opened(hook, folders):
     texts = [] if tool in WRITE_TOOLS else leaves(ti)
     found = [f for f in folders if any(opens(t, f) for t in texts)]
     if tool in ("terminal", *SHELL_LAIN):
-        pieces = [w for words, outs in shell_segments(str(ti.get("command") or "")) for w in words + outs]
+        command = str(ti.get("command") or "")
+        if tool == "Bash":   # isi heredoc untuk perintah bukan shell tidak dinilai per kata (2026-11-20)
+            command = tanpa_heredoc(command)
+        pieces = [w for words, outs in shell_segments(command) for w in words + outs]
         paths = [clean(w) for w in pieces if not w.startswith("-") and not WINDOWS_SWITCH.fullmatch(w)]
         if tool == "Bash":   # di Git Bash "/", "/.", dan "/.." adalah akar folder Git, bukan akar drive. Operator /
             paths = [p for p in paths if not (p.startswith("/") and not p.strip("/."))]   # di heredoc juga kata (2026-11-19)

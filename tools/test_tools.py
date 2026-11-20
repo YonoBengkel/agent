@@ -92,11 +92,21 @@ class VaultGuard(unittest.TestCase):
                  ("Bash", f'python tools/vault_lint.py "{v}" > "$TEMP/lint.txt"'), ("PowerShell", f'Get-Content "{self.V}\\a.md"'),
                  # di Git Bash "/" adalah akar folder Git, dan operator / di kode Python bukan path (salah tolak 2026-11-19)
                  ("Bash", "python - <<'EOF'\nimport pathlib\nprint(pathlib.Path('D:/CODE') / 'skills')\nEOF"), ("Bash", "ls /"),
-                 ("Bash", "cat <<'EOF'\nmemakai operator /.\nEOF")]
+                 ("Bash", "cat <<'EOF'\nmemakai operator /.\nEOF"),
+                 # isi heredoc untuk perintah bukan shell tidak dinilai per kata (keputusan pengguna 2026-11-20)
+                 ("Bash", "git commit -F - <<'EOF'\nperbaikan ../.. di penjaga\nEOF"),
+                 ("Bash", "git add -A && git commit -m \"$(cat <<'EOF'\nperbaikan ../.. di penjaga\nEOF\n)\""),
+                 ("Bash", "python - <<'EOF'\nprint('../..')\nEOF")]
         tolak = [("Bash", f'cat "{pv}/a.md"'), ("PowerShell", f'Get-Content "{P}\\a.md"'), ("Bash", 'ls "/d/Pribadi Uji"'),
                  ("Bash", "ls D:/"), ("PowerShell", f'Get-ChildItem "{P}" -Recurse'), ("Bash", f"python -c \"open(r'{pv}/a.md').read()\""),
                  ("PowerShell", "Get-ChildItem / -Recurse"), ("Bash", 'for d in C D; do ls "$d:"; done'),   # di PowerShell "/" akar drive
-                 ("Bash", "find ../.. -name a.md")]   # path relatif tetap diperiksa: dari D:/CODE naik ke akar drive
+                 ("Bash", "find ../.. -name a.md"),   # path relatif tetap diperiksa: dari D:/CODE naik ke akar drive
+                 # heredoc yang dijalankan shell, dipakai sebagai argumen, atau << di dalam kutip tetap dinilai
+                 ("Bash", "bash <<'EOF'\nfind ../.. -name a.md\nEOF"), ("Bash", "cat <<'EOF' | sh\nls ../..\nEOF"),
+                 ("Bash", "ls $(cat <<'EOF'\n../..\nEOF\n)"), ("Bash", "cat <<'EOF' | xargs ls\n../..\nEOF"),
+                 ("Bash", "while read p; do ls \"$p\"; done <<'EOF'\n../..\nEOF"), ("Bash", "echo \"<<EOF\"\nfind ../.. -name a\nEOF"),
+                 ("Bash", "if true; then . /dev/stdin <<'EOF'\nls ../..\nEOF\nfi"),
+                 ("Bash", f"python - <<'EOF'\nopen(r'{pv}/a.md').read()\nEOF")]   # path utuh tetap ditolak lewat opens()
         self.assertEqual([putus(*k) for k in lolos], ["allow"] * len(lolos))
         self.assertEqual([putus(*k) for k in tolak], ["deny"] * len(tolak))   # D:/ ikut: induk vault pribadi, sama dengan Hermes
 
