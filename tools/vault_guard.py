@@ -374,8 +374,10 @@ def opened(hook, folders):
             command = tanpa_heredoc(command)
         pieces = [w for words, outs in shell_segments(command) for w in words + outs]
         paths = [clean(w) for w in pieces if not w.startswith("-") and not WINDOWS_SWITCH.fullmatch(w)]
-        if tool == "Bash":   # di Git Bash "/", "/.", dan "/.." adalah akar folder Git, bukan akar drive. Operator /
-            paths = [p for p in paths if not (p.startswith("/") and not p.strip("/."))]   # di heredoc juga kata (2026-11-19)
+        if tool == "Bash":   # Git Bash: path berawalan / selain bentuk drive (/d/...) dan UNC (//...) menunjuk folder Git atau
+            # mount seperti /tmp, tidak pernah ke D:. Ini mencakup /, operator / Python (2026-11-19), dan pola regex awk atau
+            # sed yang diawali / dan memuat wildcard (2026-11-20). Path utuh, termasuk /mnt/d/..., tetap dicek lewat opens()
+            paths = [p for p in paths if not (p.startswith("/") and not p.startswith("//") and not GIT_BASH.match(p))]
     elif tool == "execute_code":
         paths = []
     else:

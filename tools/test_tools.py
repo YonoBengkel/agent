@@ -96,7 +96,10 @@ class VaultGuard(unittest.TestCase):
                  # isi heredoc untuk perintah bukan shell tidak dinilai per kata (keputusan pengguna 2026-11-20)
                  ("Bash", "git commit -F - <<'EOF'\nperbaikan ../.. di penjaga\nEOF"),
                  ("Bash", "git add -A && git commit -m \"$(cat <<'EOF'\nperbaikan ../.. di penjaga\nEOF\n)\""),
-                 ("Bash", "python - <<'EOF'\nprint('../..')\nEOF")]
+                 ("Bash", "python - <<'EOF'\nprint('../..')\nEOF"),
+                 # pola regex awk atau sed yang diawali / bukan path ke akar drive (salah tolak 2026-11-20)
+                 ("Bash", "awk '/^## .*Ingest/{f=1} f' \"Operasi Vault.md\""), ("Bash", "sed -n '/^## A/,/^## B/p' a.md"),
+                 ("Bash", "ls /usr/bin /tmp")]
         tolak = [("Bash", f'cat "{pv}/a.md"'), ("PowerShell", f'Get-Content "{P}\\a.md"'), ("Bash", 'ls "/d/Pribadi Uji"'),
                  ("Bash", "ls D:/"), ("PowerShell", f'Get-ChildItem "{P}" -Recurse'), ("Bash", f"python -c \"open(r'{pv}/a.md').read()\""),
                  ("PowerShell", "Get-ChildItem / -Recurse"), ("Bash", 'for d in C D; do ls "$d:"; done'),   # di PowerShell "/" akar drive
@@ -106,7 +109,9 @@ class VaultGuard(unittest.TestCase):
                  ("Bash", "ls $(cat <<'EOF'\n../..\nEOF\n)"), ("Bash", "cat <<'EOF' | xargs ls\n../..\nEOF"),
                  ("Bash", "while read p; do ls \"$p\"; done <<'EOF'\n../..\nEOF"), ("Bash", "echo \"<<EOF\"\nfind ../.. -name a\nEOF"),
                  ("Bash", "if true; then . /dev/stdin <<'EOF'\nls ../..\nEOF\nfi"),
-                 ("Bash", f"python - <<'EOF'\nopen(r'{pv}/a.md').read()\nEOF")]   # path utuh tetap ditolak lewat opens()
+                 ("Bash", f"python - <<'EOF'\nopen(r'{pv}/a.md').read()\nEOF"),   # path utuh tetap ditolak lewat opens()
+                 # bentuk drive Git Bash, mount WSL, dan /.. dari akar Git tetap ditolak (2026-11-20)
+                 ("Bash", "ls /d/"), ("Bash", 'ls "/mnt/d/Pribadi Uji"'), ("Bash", 'cat "/../d/Pribadi Uji/a.md"')]
         self.assertEqual([putus(*k) for k in lolos], ["allow"] * len(lolos))
         self.assertEqual([putus(*k) for k in tolak], ["deny"] * len(tolak))   # D:/ ikut: induk vault pribadi, sama dengan Hermes
 
