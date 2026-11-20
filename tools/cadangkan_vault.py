@@ -8,16 +8,24 @@ hanya membaca `.md`, padahal cadangan konfigurasi di vault berupa JSON dan YAML,
 semuanya. Folder `.git` dan `.obsidian` dilewati: yang kedua hanya pengaturan aplikasi, dan angka pengaturan
 grafiknya mirip nomor identitas.
 
+Gerbang kedua (riset M2, 2026-11-21): dengan --gitleaks, gitleaks mode dir memindai seluruh vault dengan pola dan
+entropinya sendiri, sehingga token penyedia yang ditempel di prosa tanpa nama variabel ikut tertangkap. Nilainya
+disensor, dan yang dicetak tetap hanya nama berkas, ID aturan, dan nomor baris. Kalau gitleaks gagal jalan, tidak ada
+yang dikirim. Temuan yang sudah diperiksa dan ternyata bukan secret dicatat sidiknya di `<vault>/.gitleaksignore`.
+
 Dijalankan di langkah terakhir Kompilasi (Konfigurasi/Operasi Vault.md).
 
-Pakai: python tools/cadangkan_vault.py --vault "<vault>" --words <daftar kata> --secrets-from <berkas> [--cek]
+Pakai: python tools/cadangkan_vault.py --vault "<vault>" --words <daftar kata> --secrets-from <berkas>
+       [--gitleaks <gitleaks.exe>] [--cek]
 """
 import argparse
 import datetime
+import json
 import os
 import re
 import subprocess
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import vault_guard  # pola yang sama dengan hook penjaga vault
@@ -54,6 +62,23 @@ def pindai(vault, banned, secrets):
                 temuan.append((os.path.relpath(p, vault), alasan))
     return temuan
 
+def pindai_gitleaks(vault, exe):
+    """[(path relatif, [alasan])] dari gitleaks mode dir. Dijalankan dari dalam vault supaya sidik temuannya memakai
+    path relatif dan `.gitleaksignore` di akar vault terbaca. RuntimeError kalau gitleaks gagal jalan."""
+    with tempfile.TemporaryDirectory() as d:
+        laporan = os.path.join(d, "laporan.json")
+        r = subprocess.run([exe, "dir", ".", "--redact", "--no-banner", "--log-level", "error", "--exit-code", "0",
+                            "--report-format", "json", "--report-path", laporan], cwd=vault, capture_output=True, timeout=600)
+        if r.returncode or not os.path.exists(laporan):
+            pesan = r.stderr.decode("utf-8", "replace").strip().splitlines()
+            raise RuntimeError(f"kode {r.returncode}{': ' + pesan[-1] if pesan else ''}")
+        with open(laporan, encoding="utf-8") as f:
+            data = json.load(f)
+    temuan = {}
+    for x in data:
+        temuan.setdefault(os.path.normpath(x["File"]), []).append(f"gitleaks {x['RuleID']} baris {x['StartLine']}")
+    return sorted(temuan.items())
+
 def git(vault, *args):
     r = subprocess.run(["git", "-C", vault, *args], capture_output=True, timeout=300)
     return r.returncode, (r.stdout + r.stderr).decode("utf-8", "replace").strip()
@@ -63,12 +88,20 @@ def main():
     p.add_argument("--vault", required=True, help="Folder vault yang sudah menjadi repo git")
     p.add_argument("--words", help="Daftar kata terlarang (lokal, tidak pernah ikut dikirim)")
     p.add_argument("--secrets-from", action="append", default=[], help="Berkas berisi nilai secret yang tidak boleh ada di vault")
+    p.add_argument("--gitleaks", help="Path gitleaks.exe untuk gerbang kedua. Kalau gagal jalan, tidak ada yang dikirim")
     p.add_argument("--cek", action="store_true", help="Hanya pindai dan hitung perubahan, tanpa commit atau push")
     a = p.parse_args()
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     if not os.path.isdir(os.path.join(a.vault, ".git")):
         sys.exit(f"{a.vault} belum menjadi repo git. Jalankan `git init` di sana dulu.")
     temuan = pindai(a.vault, vault_guard.banned_words(a.words), nilai_secret(a.secrets_from))
+    if a.gitleaks:
+        try:
+            temuan += pindai_gitleaks(a.vault, a.gitleaks)
+        except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as e:
+            sys.exit(f"Gerbang gitleaks gagal jalan ({e}). Tidak ada yang di-commit atau di-push.")
+    else:
+        print("Gerbang kedua tidak dipakai. Tambahkan --gitleaks <path gitleaks.exe>.")
     for rel, alasan in temuan:
         print(f"DITAHAN {rel}: {', '.join(alasan)}")
     if temuan:

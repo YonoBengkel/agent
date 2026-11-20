@@ -1101,6 +1101,25 @@ class CadangkanVault(unittest.TestCase):  # vault dipindai dulu sebelum dikirim 
             log = subprocess.run(["git", "-C", v, "log", "--oneline"], capture_output=True).stdout.decode("utf-8")
             self.assertIn("cadangan vault", log)
 
+    def test_gerbang_gitleaks(self):  # gerbang kedua riset M2 (2026-11-21), dilewati kalau GITLEAKS tidak menunjuk gitleaks.exe
+        import random, string, tempfile
+        import cadangkan_vault as c
+        exe = os.environ.get("GITLEAKS", "")
+        if not os.path.isfile(exe):
+            self.skipTest("set GITLEAKS ke path gitleaks.exe")
+        # token palsu dibuat saat tes jalan, jadi repo publik ini tidak memuat literal yang mirip token
+        palsu = "ghp_" + "".join(random.choice(string.ascii_letters + string.digits) for _ in range(36))
+        with tempfile.TemporaryDirectory() as v:
+            a = os.path.join(v, "a.md")
+            with open(a, "w", encoding="utf-8") as f:
+                f.write(f"token lama tertempel di prosa: {palsu}\n")
+            self.assertEqual([r for r, _ in c.pindai_gitleaks(v, exe)], ["a.md"])
+            with open(a, "w", encoding="utf-8") as f:
+                f.write("token lama tertempel di prosa: <disensor>\n")
+            self.assertEqual(c.pindai_gitleaks(v, exe), [])
+            with self.assertRaises((OSError, RuntimeError)):   # gagal jalan berarti main() berhenti sebelum commit
+                c.pindai_gitleaks(os.path.join(v, "tidak-ada"), exe)
+
 class PutarLog(unittest.TestCase):  # log wiki diputar per bulan (2026-11-10)
     def test_putar_dan_ulang(self):
         import tempfile
