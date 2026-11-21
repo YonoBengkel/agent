@@ -28,5 +28,7 @@
 !/tools/cadangkan_vault.py
 !/tools/penjaga_repo.py
 !/tools/uji_penjaga.py
+!/tools/laporan_harian.py
+!/tools/cek_jurnal.py
 !/tools/test_tools.py
 !/tools/requirements/

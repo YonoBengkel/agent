@@ -45,15 +45,23 @@ def canary_warning(root=None):
         return ""
     return f"\n\n{line}" if line else ""
 
+def report_line():
+    """Satu baris dari laporan harian terjadwal kalau ada cek yang bermasalah atau laporannya basi (log vault 073)."""
+    try:
+        import laporan_harian
+        return laporan_harian.baris()
+    except Exception:
+        return ""
+
 def hot_context(hot, root=None):
-    """Mode AI Agent: muat hot.md (Aturan 1), plus pengingat Kompilasi dan peringatan canary basi."""
+    """Mode AI Agent: muat hot.md (Aturan 1), plus pengingat Kompilasi, peringatan canary basi, dan laporan harian."""
     try:
         with open(hot, encoding="utf-8-sig") as f:
             text = f.read()
     except OSError as e:
         text = f"[hot.md tidak bisa dibaca: {e}. Baca manual sesuai Aturan 1.]"
     return ("Isi hot.md, dimuat otomatis di awal sesi (Aturan 1). Ini cache; detail ada di index.md dan KONTEKS_PROYEK.md.\n\n"
-            + text + compile_reminder(os.path.dirname(os.path.abspath(hot))) + canary_warning(root))
+            + text + compile_reminder(os.path.dirname(os.path.abspath(hot))) + canary_warning(root) + report_line())
 
 def project_name(root, cwd):
     """Folder proyek tingkat pertama di bawah root untuk folder kerja ini, atau None kalau di luar root."""

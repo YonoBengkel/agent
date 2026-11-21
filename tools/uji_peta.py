@@ -220,6 +220,12 @@ def uji_tool(nama, vault, berat):
         elif nama == "uji_penjaga.py":
             k, o = jalan([py, "-B", "tools/uji_penjaga.py", "--help"])
             ok, pesan = k == 0 and "hermes-config" in o, "--help. Logikanya diuji test_tools.py, uji hidupnya butuh path konfigurasi hook"
+        elif nama == "laporan_harian.py":
+            k, o = jalan([py, "-B", "tools/laporan_harian.py", "--help"])
+            ok, pesan = k == 0 and "baris" in o, "--help. Logikanya diuji test_tools.py, run sungguhan dijalankan Task Scheduler"
+        elif nama == "cek_jurnal.py":
+            k, o = jalan([py, "-B", "tools/cek_jurnal.py", "--help"])
+            ok, pesan = k == 0 and "projects-root" in o, "--help. Logikanya diuji test_tools.py, jalur hook sungguhan diuji di sesi"
         elif nama == "medusa":
             k, o = jalan([AKAR / "tools" / "medusa-venv" / "Scripts" / "medusa.exe", "--version"])
             ok, pesan = k == 0 and "MEDUSA" in o, "hanya --version. Pindaian penuh berat untuk RAM mesin ini"

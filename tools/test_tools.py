@@ -99,7 +99,10 @@ class VaultGuard(unittest.TestCase):
                  ("Bash", "python - <<'EOF'\nprint('../..')\nEOF"),
                  # pola regex awk atau sed yang diawali / bukan path ke akar drive (salah tolak 2026-11-20)
                  ("Bash", "awk '/^## .*Ingest/{f=1} f' \"Operasi Vault.md\""), ("Bash", "sed -n '/^## A/,/^## B/p' a.md"),
-                 ("Bash", "ls /usr/bin /tmp")]
+                 ("Bash", "ls /usr/bin /tmp"),
+                 # \[ di Bash adalah escape, dan d: sesudah kata kunci Python atau kurung adalah kode (salah tolak 2026-11-21)
+                 ("Bash", 'grep -vE "\\[SAMA\\]|\\[OK\\]" a.txt'), ("Bash", 'python -c "d = [1]\nfor x in d:\n    print(x)"'),
+                 ("Bash", "python - <<'EOF'\nd = {}\nif d:\n    print(d[1:], {d: 1})\nEOF")]
         tolak = [("Bash", f'cat "{pv}/a.md"'), ("PowerShell", f'Get-Content "{P}\\a.md"'), ("Bash", 'ls "/d/Pribadi Uji"'),
                  ("Bash", "ls D:/"), ("PowerShell", f'Get-ChildItem "{P}" -Recurse'), ("Bash", f"python -c \"open(r'{pv}/a.md').read()\""),
                  ("PowerShell", "Get-ChildItem / -Recurse"), ("Bash", 'for d in C D; do ls "$d:"; done'),   # di PowerShell "/" akar drive
@@ -111,7 +114,10 @@ class VaultGuard(unittest.TestCase):
                  ("Bash", "if true; then . /dev/stdin <<'EOF'\nls ../..\nEOF\nfi"),
                  ("Bash", f"python - <<'EOF'\nopen(r'{pv}/a.md').read()\nEOF"),   # path utuh tetap ditolak lewat opens()
                  # bentuk drive Git Bash, mount WSL, dan /.. dari akar Git tetap ditolak (2026-11-20)
-                 ("Bash", "ls /d/"), ("Bash", 'ls "/mnt/d/Pribadi Uji"'), ("Bash", 'cat "/../d/Pribadi Uji/a.md"')]
+                 ("Bash", "ls /d/"), ("Bash", 'ls "/mnt/d/Pribadi Uji"'), ("Bash", 'cat "/../d/Pribadi Uji/a.md"'),
+                 # akar drive tetap ditolak sesudah pengecualian kode Python (2026-11-21)
+                 ("Bash", "ls D:"), ("Bash", "for f in D:/*; do echo $f; done"),
+                 ("Bash", "python -c \"import os; print(os.listdir('D:/'))\"")]
         self.assertEqual([putus(*k) for k in lolos], ["allow"] * len(lolos))
         self.assertEqual([putus(*k) for k in tolak], ["deny"] * len(tolak))   # D:/ ikut: induk vault pribadi, sama dengan Hermes
 
@@ -1119,6 +1125,55 @@ class CadangkanVault(unittest.TestCase):  # vault dipindai dulu sebelum dikirim 
             self.assertEqual(c.pindai_gitleaks(v, exe), [])
             with self.assertRaises((OSError, RuntimeError)):   # gagal jalan berarti main() berhenti sebelum commit
                 c.pindai_gitleaks(os.path.join(v, "tidak-ada"), exe)
+
+class CekJurnal(unittest.TestCase):  # hook Stop jurnal, rancangan 2 di log vault 073 (2026-11-21)
+    def test_tahan_sekali_per_perubahan(self):
+        import json, tempfile
+        import cek_jurnal as c
+        with tempfile.TemporaryDirectory() as d:
+            root, vault, state = (os.path.join(d, n) for n in ("CODE", "Vault", "state"))
+            os.makedirs(os.path.join(root, "keluar"))
+            open(os.path.join(root, "keluar", ".no-vault"), "w").close()
+            tr = os.path.join(d, "t.jsonl")
+            def tambah(*blok):
+                with open(tr, "a", encoding="utf-8") as f:
+                    f.write(json.dumps({"message": {"content": list(blok)}}) + "\n")
+            def pakai(i, path):
+                return {"type": "tool_use", "id": i, "name": "Edit", "input": {"file_path": path}}
+            muat = {"session_id": "s1", "transcript_path": tr}
+            tambah(pakai("1", os.path.join(root, "proyek", "a.py")))
+            self.assertEqual(c.periksa(muat, vault, root, state)["decision"], "block")
+            self.assertIsNone(c.periksa(muat, vault, root, state))   # tidak ditahan dua kali untuk perubahan yang sama
+            tambah(pakai("2", os.path.join(vault, "Log", "001 x.md")))
+            tambah(pakai("3", os.path.join(root, "keluar", "b.py")))   # proyek .no-vault dilewati
+            tambah(pakai("4", os.path.join(root, "proyek", "c.py")))
+            tambah({"type": "tool_result", "tool_use_id": "4", "is_error": True})   # tulisan gagal tidak dihitung
+            self.assertIsNone(c.periksa(muat, vault, root, state))
+            tambah(pakai("5", os.path.join(root, "proyek", "d.py")))
+            self.assertIn("d.py", c.periksa(muat, vault, root, state)["reason"])
+            self.assertIsNone(c.periksa(dict(muat, session_id="s2", stop_hook_active=True), vault, root, state))
+
+class LaporanHarian(unittest.TestCase):  # laporan harian terjadwal, rancangan 1 di log vault 073 (2026-11-21)
+    def test_baris_dan_lint(self):
+        import datetime, json, tempfile
+        import laporan_harian as l
+        lint = ("## Rujukan path yang tidak ada lagi (halaman wiki dan hot.md) — 4\n## Index RAG — 24 file berubah\n"
+                "## hot.md — 510 kata ⚠️ di atas batas ~500\n## File kosong (0 byte / hanya spasi) — 0\n")
+        self.assertEqual(l.ringkas_lint(lint), ["Rujukan path yang tidak ada lagi (halaman wiki dan hot.md) 4",
+                                                "hot.md — 510 kata ⚠️ di atas batas ~500"])
+        with tempfile.TemporaryDirectory() as d:
+            p, hari = os.path.join(d, "laporan.json"), datetime.date(2026, 11, 21)
+            self.assertEqual(l.baris(p, hari), "")   # belum pernah jalan: diam
+            data = {"tanggal": "2026-11-21", "cek": {"lint vault": {"status": "ok", "rincian": []},
+                                                     "penjaga terpasang": {"status": "temuan", "rincian": ["GAGAL x"]}}}
+            with open(p, "w", encoding="utf-8") as f:
+                json.dump(data, f)
+            self.assertIn("1 cek bermasalah: penjaga terpasang (temuan: GAGAL x)", l.baris(p, hari))
+            self.assertIn("mungkin tidak jalan", l.baris(p, datetime.date(2026, 11, 23)))
+            data["cek"]["penjaga terpasang"] = {"status": "ok", "rincian": []}
+            with open(p, "w", encoding="utf-8") as f:
+                json.dump(data, f)
+            self.assertEqual(l.baris(p, hari), "")
 
 class PutarLog(unittest.TestCase):  # log wiki diputar per bulan (2026-11-10)
     def test_putar_dan_ulang(self):

@@ -348,6 +348,11 @@ def opens(text, folder):
     variants = (re.sub(r"""["']""", "", raw), re.sub(r"""["']""", " ", raw))
     path = os.path.abspath(folder).replace("\\", "/").lower().rstrip("/")
     def forms(p):  # akar drive tidak punya bentuk /d, karena bentrok dengan switch Windows
+        if len(p) == 2:   # d: polos sesudah kata kunci Python, kurung, atau koma adalah kode (for x in d:, x[d:], {d: 1},
+            # def f(d: int)), bukan akar drive (salah tolak 2026-11-21). d:/ tetap dinilai tanpa pengecualian itu.
+            kode = "".join(f"(?<!{re.escape(k)})" for k in ("in ", "if ", "elif ", "while ", "lambda ", "as ", "not ",
+                                                              "or ", "and ", "[", "{", "(", ","))
+            return [r"(?<![\w.-])" + re.escape(p) + "(?=/)", r"(?<![\w.-])" + kode + re.escape(p) + "(?!/)"]
         return [r"(?<![\w.-])" + re.escape(p)] + ([re.escape(f"/{p[0]}{p[2:]}")] if p[2:] else [])
     def found(pattern):
         return any(re.search(pattern, flat) for flat in variants)
@@ -378,6 +383,8 @@ def opened(hook, folders):
             # mount seperti /tmp, tidak pernah ke D:. Ini mencakup /, operator / Python (2026-11-19), dan pola regex awk atau
             # sed yang diawali / dan memuat wildcard (2026-11-20). Path utuh, termasuk /mnt/d/..., tetap dicek lewat opens()
             paths = [p for p in paths if not (p.startswith("/") and not p.startswith("//") and not GIT_BASH.match(p))]
+            # garis miring terbalik sebelum * ? [ ] di Bash adalah escape, bukan akar drive: grep "\[OK\]" (2026-11-21)
+            paths = [re.sub(r"\\([*?\[\]])", r"\1", p) for p in paths]
     elif tool == "execute_code":
         paths = []
     else:
