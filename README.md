@@ -80,8 +80,8 @@ akun milik pemilik repo tidak ikut.
 | `--model-dari` | Folder berisi `model.onnx` dan `tokenizer.json` yang sudah diunduh, supaya tidak mengunduh lagi |
 | `--paksa` | Timpa berkas aturan yang sudah ada. Berkas lamanya dicadangkan dulu |
 
-Path tidak boleh memuat kutip, `%`, `$`, atau backtick. Vault dan folder kerja harus terpisah, tidak
-saling memuat.
+Path tidak boleh memuat kutip ganda, `%`, `$`, atau backtick. Vault dan folder kerja harus terpisah,
+tidak saling memuat.
 
 Setiap berkas di keluarannya diberi tanda:
 
@@ -94,8 +94,17 @@ Di akhir, `pasang.py` menjalankan `sync_rules.py --check` dan `uji_penjaga.py`, 
 kode 1 kalau ada yang bermasalah.
 
 `pasang.py` aman dijalankan ulang dengan opsi yang sama, misalnya sesudah `git pull`. Hook kit diganti
-dengan versi terbaru, dan hook milikmu sendiri dibiarkan. Aturan, isi vault, `.env`, dan skill yang
-sudah ada tidak ditimpa, kecuali aturan dengan `--paksa`.
+dengan versi terbaru, dan hook milikmu sendiri dibiarkan. Hook kit dikenali dari perintahnya yang
+menunjuk ke folder `tools` repo ini, jadi jangan menaruh skrip hook buatanmu sendiri di sana. Aturan,
+isi vault, `.env`, dan skill yang sudah ada tidak ditimpa, kecuali aturan dengan `--paksa`.
+
+Konfigurasi agent yang akan digabung diperiksa dulu. Kalau bentuknya tidak dikenali, misalnya
+`settings.json` yang bukan objek JSON, `pasang.py` berhenti sebelum menulis apa pun. Kalau langkah RAG
+gagal, misalnya karena koneksi putus, uji penjaga tetap dijalankan dan masalahnya dicetak di akhir.
+
+Cadangan otomatis ke folder `Cadangan Aturan` di vault hanya memuat aturan dan berkas buatan kit.
+Pengaturan agent milikmu tidak ikut ke sana, karena bisa memuat secret. Cadangannya cukup `.bak-<waktu>`
+di sebelah berkasnya.
 
 ## Sesudah memasang
 

@@ -1550,6 +1550,21 @@ class Pasang(unittest.TestCase):  # logika pemasang kit agent (pasang.py, 2026-1
         self.assertNotIn("Stop", baru["hooks"])   # grup yang hanya berisi hook kit lama hilang
         self.assertEqual(self.p.gabung_claude(baru, kit, deny, penanda), baru)
         self.assertIn("--lama", str(lama))   # masukan tidak diubah
+        kosong = self.p.gabung_claude({"hooks": None, "permissions": {"deny": None}}, kit, deny, penanda)   # null dianggap kosong
+        self.assertEqual(kosong["permissions"]["deny"], deny)
+        self.assertEqual(list(kosong["hooks"]), ["PreToolUse"])
+
+    def test_bentuk_salah(self):  # konfigurasi yang tidak bisa digabung ditolak sebelum ada yang ditulis (tinjauan 2026-11-23)
+        f = self.p.bentuk_salah
+        self.assertIsNone(f({}))
+        self.assertIsNone(f({"hooks": {"Stop": [{"hooks": [{"command": "x"}]}]}, "permissions": {"deny": []}}))
+        self.assertIsNone(f({"hooks": None, "permissions": None}))
+        self.assertIsNone(f({"hooks": [], "permissions": []}))   # wadah kosong dianggap belum ada, tidak ada isi yang hilang
+        for salah in ([], None, "x", {"hooks": ["x"]}, {"hooks": {"Stop": {}}}, {"hooks": {"Stop": [{"hooks": "x"}]}},
+                      {"hooks": {"Stop": [{"hooks": ["x"]}]}}, {"permissions": ["x"]}, {"permissions": {"deny": "x"}}):
+            self.assertIsNotNone(f(salah), salah)
+        self.assertIsNone(f({"grup": {"apa": "saja"}}, claude=False))   # hooks.json Antigravity cukup berupa objek
+        self.assertIsNotNone(f([], claude=False))
 
     def test_gabung_hermes(self):
         b, e = self.p.BEGIN_YAML, self.p.END_YAML
@@ -1561,6 +1576,12 @@ class Pasang(unittest.TestCase):  # logika pemasang kit agent (pasang.py, 2026-1
         self.assertIsNone(self.p.gabung_hermes(cfg + "hooks:\n  pre_tool_call:\n    - command: milikku\n", blok))
         self.assertEqual(self.p.gabung_hermes(cfg + "hooks: {}\nterminal:\n  x: 1\n", blok), cfg + "terminal:\n  x: 1\n\n" + blok)
         self.assertEqual(self.p.gabung_hermes("hooks:\n", blok), blok)
+        # Isi hooks sesudah baris kosong, komentar di kolom 0, atau daftar di kolom 0 tetap isi (tinjauan 2026-11-23)
+        for isi in ("hooks:\n\n  pre_tool_call: []\n", "hooks:\n# milikku\n  pre_tool_call: []\n", "hooks:\n- command: x\n",
+                    "hooks: {pre_tool_call: []}\n"):
+            self.assertIsNone(self.p.gabung_hermes(cfg + isi, blok), isi)
+        self.assertEqual(self.p.gabung_hermes(cfg + "hooks:  # nanti\n\nterminal: 1\n", blok), cfg + "\nterminal: 1\n\n" + blok)
+        self.assertEqual(self.p.gabung_hermes(cfg + "hooks: null\n", blok), cfg + "\n" + blok)
 
     def test_di_dalam_dan_kutip(self):
         d = lambda *x: os.path.join("D:" + os.sep, *x)
@@ -1569,6 +1590,9 @@ class Pasang(unittest.TestCase):  # logika pemasang kit agent (pasang.py, 2026-1
         self.assertFalse(self.p.di_dalam(os.path.join("C:" + os.sep, "x"), d("x")))   # beda drive
         self.assertEqual(self.p.kutip("C:/Python314/python.exe"), "C:/Python314/python.exe")
         self.assertEqual(self.p.kutip("C:/Program Files/Python/python.exe"), '"C:/Program Files/Python/python.exe"')
+        for p in ("C:/Users/O'Brien/python.exe", "D:/Py(3)/python.exe", "D:/a&b/python.exe", "D:/c#/python.exe"):
+            self.assertEqual(self.p.kutip(p), f'"{p}"')   # tanpa kutip, Git Bash atau shlex Hermes salah memecahnya
+        self.assertEqual(self.p.kutip("C:/Users/Andrés/python.exe"), "C:/Users/Andrés/python.exe")
 
 if __name__ == "__main__":
     unittest.main()

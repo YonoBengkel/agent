@@ -16,6 +16,7 @@ import argparse
 import copy
 import datetime
 import hashlib
+import http.client
 import json
 import os
 import pathlib
@@ -69,8 +70,10 @@ def di_dalam(anak, induk):
 
 
 def kutip(p):
-    """Program di awal perintah hook: tanpa kutip kalau bisa, supaya jalan di Git Bash, PowerShell, dan pemecah Hermes."""
-    return f'"{p}"' if " " in str(p) else str(p)
+    """Program di awal perintah hook: tanpa kutip kalau path-nya hanya huruf, angka, dan . _ - / \\ :, supaya jalan di Git Bash,
+    PowerShell, dan pemecah Hermes. Path lain (spasi, kutip tunggal, kurung, &) dikutip ganda, karena tanpa kutip
+    Git Bash dan shlex Hermes salah memecahnya."""
+    return str(p) if re.fullmatch(r"[\w.:/\\-]+", str(p)) else f'"{p}"'
 
 
 def aturan_deny(folder):
@@ -103,7 +106,7 @@ def gabung_claude(settings, hooks_kit, deny_kit, penanda):
     """Gabungkan hook kit ke settings Claude Code. Hook yang perintahnya memuat `penanda` (folder tools workspace ini)
     dianggap pasangan kit yang lama dan diganti. Hook lain dan aturan izin milik pengguna tetap ada."""
     s = copy.deepcopy(settings)
-    hooks = s.setdefault("hooks", {})
+    hooks = s["hooks"] = s.get("hooks") or {}   # "hooks": null dianggap kosong
     for event in list(hooks):
         grup = []
         for g in hooks[event]:
@@ -117,22 +120,46 @@ def gabung_claude(settings, hooks_kit, deny_kit, penanda):
     for event, grup in hooks_kit.items():
         hooks.setdefault(event, []).extend(copy.deepcopy(grup))
     if deny_kit:
-        deny = s.setdefault("permissions", {}).setdefault("deny", [])
+        izin = s["permissions"] = s.get("permissions") or {}
+        deny = izin["deny"] = izin.get("deny") or []
         deny.extend(r for r in deny_kit if r not in deny)
     return s
 
 
+def bentuk_salah(data, claude=True):
+    """Alasan konfigurasi tidak bisa digabung, atau None. Dicek sebelum ada yang ditulis, supaya pemasangan tidak berhenti
+    di tengah. claude=False untuk hooks.json Antigravity, yang cukup berupa objek."""
+    if not isinstance(data, dict):
+        return "isinya bukan objek JSON"
+    if not claude:
+        return None
+    hooks = data.get("hooks") or {}
+    if not (isinstance(hooks, dict) and all(isinstance(v, list) and all(
+            isinstance(g, dict) and isinstance(g.get("hooks") or [], list) and all(isinstance(h, dict) for h in g.get("hooks") or [])
+            for g in v) for v in hooks.values())):
+        return 'bagian "hooks" tidak berbentuk {event: [{"matcher": ..., "hooks": [{...}]}]}'
+    izin = data.get("permissions") or {}
+    if not (isinstance(izin, dict) and isinstance(izin.get("deny") or [], list)):
+        return 'bagian "permissions" bukan objek, atau "permissions.deny" bukan daftar'
+    return None
+
+
 def gabung_hermes(teks, blok):
     """config.yaml Hermes dengan blok hooks kit, atau None kalau config punya bagian hooks sendiri yang tidak berpenanda.
-    Bagian hooks yang kosong (`hooks:`, `hooks: {}`, atau `hooks: null` tanpa isi di bawahnya) diganti blok kit."""
+    Bagian hooks yang kosong (`hooks:`, `hooks: {}`, `hooks: []`, atau `hooks: null` tanpa isi di bawahnya) diganti blok kit.
+    Isi di bawahnya dicari melewati baris kosong dan komentar: baris berikutnya yang menjorok atau diawali `-` berarti ada isi."""
     pola = re.compile(re.escape(BEGIN_YAML) + r".*?" + re.escape(END_YAML) + r"[^\n]*\n?", re.S)
     if pola.search(teks):
         return pola.sub(lambda m: blok, teks, count=1)
-    kosong = re.compile(r"(?m)^hooks[ \t]*:[ \t]*(?:\{[ \t]*\}|\[[ \t]*\]|null|~)?[ \t]*(?:#[^\n]*)?(?:\n(?![ \t]+\S)|\Z)")
-    if kosong.search(teks):
-        teks = kosong.sub("", teks, count=1)
-    elif re.search(r"(?m)^hooks[ \t]*:", teks):
-        return None
+    baris = teks.split("\n")
+    i = next((n for n, b in enumerate(baris) if re.match(r"hooks[ \t]*:", b)), None)
+    if i is not None:
+        nilai = re.sub(r"(^|[ \t])#.*$", "", baris[i].split(":", 1)[1]).strip()
+        anak = next((b for b in baris[i + 1:] if b.strip() and not b.lstrip().startswith("#")), "")
+        if nilai not in ("", "{}", "[]", "null", "~") or anak[:1] in (" ", "\t", "-"):
+            return None
+        del baris[i]
+        teks = "\n".join(baris)
     return (teks.rstrip("\n") + "\n\n" if teks.strip() else "") + blok
 
 
@@ -238,7 +265,7 @@ def unduh_model(tujuan, dari=None):
                         print(f"    {tanda * 10}%", flush=True)
         if tmp.stat().st_size != ukuran or h.hexdigest() != sha:
             tmp.unlink()
-            raise SystemExit(f"{nama}: ukuran atau sha256 tidak cocok dengan revisi {MODEL_REV[:12]}. Tidak dipakai.")
+            raise ValueError(f"{nama}: ukuran atau sha256 tidak cocok dengan revisi {MODEL_REV[:12]}, jadi tidak dipakai")
         os.replace(tmp, dst)
         print(f"  [DITULIS] {dst} (sha256 cocok)")
 
@@ -293,7 +320,7 @@ def main():
     for label, path in [("workspace", WS), ("vault", vault), ("repo luar", repo_luar), ("profil", home), ("Hermes", hermes_home),
                         ("Python", py), *[("folder dilindungi", x) for x in lindungi]]:
         if any(c in LARANGAN for c in str(path)):
-            sys.exit(f"Path {label} memuat karakter yang tidak didukung (kutip, %, $, atau backtick): {path}")
+            sys.exit(f"Path {label} memuat karakter yang tidak didukung (kutip ganda, %, $, atau backtick): {path}")
     if di_dalam(vault, fk) or di_dalam(fk, vault):
         sys.exit("Vault dan folder kerja harus terpisah, tidak boleh saling memuat.")
     if di_dalam(repo_luar, fk):
@@ -302,7 +329,8 @@ def main():
         if di_dalam(vault, x) or di_dalam(x, vault) or di_dalam(WS, x) or di_dalam(x, WS):
             sys.exit(f"Folder dilindungi {x} tidak boleh memuat atau berada di dalam vault atau workspace.")
     reg_path = WS / "Konfigurasi" / "rule_sync.json"
-    if reg_path.exists() and baca_json(reg_path).get("dipasang_oleh") != "pasang.py" and not a.paksa:
+    reg_lama = baca_json(reg_path)
+    if reg_path.exists() and not (isinstance(reg_lama, dict) and reg_lama.get("dipasang_oleh") == "pasang.py") and not a.paksa:
         sys.exit(f"{reg_path} ada tapi bukan buatan pasang.py: workspace ini sudah dipasang dengan cara lain. "
                  "Jalankan di clone baru, atau pakai --paksa kalau memang mau ditimpa (berkas lama dicadangkan).")
     fk_agents = fk / "AGENTS.md"
@@ -320,6 +348,11 @@ def main():
                   or (not all(str(x).isascii() for x in (py, WS, fk, vault, repo_luar, ag_hooks, *lindungi)) and "ada path berhuruf non-ASCII"))
     ag_berhook = "antigravity" in platform and not ag_masalah
     hermes_cfg = hermes_home / "config.yaml"
+    # Konfigurasi yang akan digabung diperiksa dulu, supaya pemasangan tidak berhenti di tengah sesudah aturan ditulis
+    for path, claude_cfg in ([(home / ".claude" / "settings.json", True), (WS / ".claude" / "settings.local.json", True)]
+                             if "claude" in platform else []) + ([(home / ".gemini" / "config" / "hooks.json", False)] if ag_berhook else []):
+        if salah := bentuk_salah(baca_json(path), claude_cfg):
+            sys.exit(f"{path}: {salah}. Perbaiki dulu. pasang.py belum menulis apa pun.")
 
     PY, WSP, VP, FKP, RLP = kutip(posix(py)), posix(WS), posix(vault), posix(fk), posix(repo_luar)
     nama_ws = WS.name
@@ -389,7 +422,9 @@ def main():
                     ket="blok sync ditambahkan" if lama.strip() else "")
 
     print("\n# Agent")
-    cadangan_files, redact = [], []
+    # Cadangan ke vault hanya berkas yang seluruh isinya ditulis kit. Pengaturan agent milik pengguna (settings.json, hooks.json,
+    # config.yaml) bisa memuat secret yang lolos sensor nama kunci, jadi cadangannya cukup .bak-<waktu> di sebelah berkasnya.
+    cadangan_files = []
     tools = f"{WSP}/tools/"
     if "claude" in platform:
         claude = home / ".claude"
@@ -422,14 +457,11 @@ def main():
         deny = [r for x in lindungi for r in aturan_deny(x)]
         st = claude / "settings.json"
         tulis_json(w, st, gabung_claude(baca_json(st), hooks, deny, tools), "hook kit digabung")
-        cadangan_files.append(st)
-        redact.append(st)
         lokal = WS / ".claude" / "settings.local.json"
         hooks_ws = {"SessionStart": [{"hooks": [{"type": "command", "command": cmd("session_context.py", f'"{VP}/hot.md"'), "timeout": 15}]}],
                     "Stop": [{"hooks": [{"type": "command", "command": cmd("export_transcript.py", f'--out "{WSP}/Riwayat Perckapan" --secrets-from "{WSP}/.env"', True),
                                          "timeout": 30, "async": True}]}]}
         tulis_json(w, lokal, gabung_claude(baca_json(lokal), hooks_ws, [], tools))
-        cadangan_files.append(lokal)
         for f in sorted((TEMPLAT / "claude" / "agents").iterdir()):
             w.tulis(claude / "agents" / f.name, f.read_text(encoding="utf-8"))
     if ag_berhook:
@@ -448,7 +480,6 @@ def main():
                 "penjaga-vault": {"PreToolUse": [{"matcher": VAULT_AG, "hooks": [{"type": "command", "command": hp("vault_guard"), "timeout": 20}]}]}}
         hj = home / ".gemini" / "config" / "hooks.json"
         tulis_json(w, hj, {**baca_json(hj), **grup}, "grup hook kit diganti")
-        cadangan_files.append(hj)
     hermes_berhook = False
     if "hermes" in platform:
         # Argumen dirakit di luar f-string: backslash di dalam ekspresi f-string baru boleh mulai Python 3.12
@@ -476,8 +507,6 @@ def main():
         if baru is not None:
             w.tulis(hermes_cfg, baru, timpa=True, ket="blok hooks kit")
             hermes_berhook = True
-            cadangan_files.append(hermes_cfg)
-            redact.append(hermes_cfg)
         else:
             alasan = "belum ada (jalankan hermes setup dulu)" if not hermes_cfg.exists() else "sudah punya bagian hooks sendiri"
             print(f"  [LEWAT] {hermes_cfg}: {alasan}. Potongan hook-nya ditulis ke Konfigurasi, gabungkan sendiri.")
@@ -518,9 +547,10 @@ def main():
                       "copies": [{"path": posix(pth), "platform": pf} for pth, _, pf in salinan]}],
            "translations": terjemahan,
            "backup": {"note": "Cadangan otomatis setiap sinkronisasi ke folder vault, supaya ikut ke mana pun vault dicadangkan. "
-                              "Konfigurasi agent disensor nilai rahasianya.",
+                              "Pengaturan agent milik pengguna sengaja tidak ikut, karena bisa memuat secret. Cadangannya "
+                              ".bak-<waktu> di sebelah berkasnya, dan bagian kit bisa ditulis ulang dengan pasang.py.",
                       "dir": posix(vault / "Cadangan Aturan"), "folders": [posix(konf)],
-                      "files": sorted({posix(f) for f in cadangan_files}), "redact": sorted({posix(f) for f in redact}),
+                      "files": sorted({posix(f) for f in cadangan_files}),
                       "exclude": ["penjaga_vault_terlarang.txt", "istilah_pribadi.txt"],
                       "readme": "# Cadangan Aturan\n\n> Salinan otomatis sumber aturan, terjemahannya, dan isi folder Konfigurasi workspace agent, "
                                 "ditulis `tools/sync_rules.py` setiap kali aturan disinkronkan, supaya ikut ke mana pun vault dicadangkan.\n\n"
@@ -542,16 +572,20 @@ def main():
         masalah.append("sync_rules.py --check melaporkan masalah (lihat di atas)")
 
     if rag:
+        # Gagal di sini tidak menghentikan pemasangan: hook sudah terpasang, jadi uji penjaga di bawah tetap harus jalan
         print("\n# RAG")
         venv_py = WS / "tools" / "rag-venv" / "Scripts" / "python.exe"
-        if not venv_py.exists() and jalan([py, "-m", "venv", WS / "tools" / "rag-venv"]):
-            sys.exit("Gagal membuat venv RAG.")
-        if jalan([venv_py, "-m", "pip", "install", "--disable-pip-version-check", "-q", "-r", WS / "tools" / "requirements" / "rag-kit.txt"]):
-            sys.exit("Gagal memasang paket RAG. Jalankan ulang pasang.py sesudah koneksi atau versi Python diperbaiki.")
-        unduh_model(MODEL_DIR, a.model_dari)
-        env_rag = {**os.environ, "AGENT_VAULT": str(vault)}
-        if jalan([venv_py, WS / "tools" / "rag_engine.py", "index", vault], env=env_rag):
-            masalah.append("indeks RAG gagal dibuat")
+        try:
+            if not venv_py.exists() and jalan([py, "-m", "venv", WS / "tools" / "rag-venv"]):
+                raise RuntimeError("venv RAG gagal dibuat")
+            if jalan([venv_py, "-m", "pip", "install", "--disable-pip-version-check", "-q", "-r", WS / "tools" / "requirements" / "rag-kit.txt"]):
+                raise RuntimeError("paket RAG gagal dipasang. Jalankan ulang pasang.py sesudah koneksi atau versi Python diperbaiki")
+            unduh_model(MODEL_DIR, a.model_dari)
+            if jalan([venv_py, WS / "tools" / "rag_engine.py", "index", vault], env={**os.environ, "AGENT_VAULT": str(vault)}):
+                raise RuntimeError("indeks RAG gagal dibuat")
+        except (OSError, ValueError, RuntimeError, http.client.HTTPException) as e:
+            print(f"  [GAGAL] RAG: {e}")
+            masalah.append(f"RAG: {e}. Jalankan ulang pasang.py, langkah yang sudah selesai dilewati")
 
     print("\n# Uji penjaga terpasang")
     konfig = (["--claude-settings", home / ".claude" / "settings.json"] if "claude" in platform else []) \

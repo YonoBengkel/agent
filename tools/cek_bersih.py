@@ -102,7 +102,8 @@ def pindai(akar, berkas, istilah, secrets, izin, terpakai):
         for jenis in temuan_baris(rel, istilah, secrets):
             if not diizinkan(izin, rel, jenis, rel, terpakai):
                 hasil.append((rel, 0, jenis))
-        data = open(os.path.join(akar, rel), "rb").read()
+        with open(os.path.join(akar, rel), "rb") as f:
+            data = f.read()
         if b"\0" in data:
             continue   # biner: gitleaks yang memindainya
         teks = data.decode("utf-8", "replace")
