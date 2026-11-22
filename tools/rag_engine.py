@@ -8,6 +8,7 @@ import fnmatch
 import argparse
 import subprocess
 from collections import Counter, defaultdict
+import lokasi
 
 # Model embedding disimpan di D: (tools/models), bukan cache default di C: (Aturan 8).
 # Harus di-set sebelum chromadb/sentence-transformers di-import.
@@ -51,7 +52,8 @@ EXTS = ['.md', '.txt', '.csv']
 CONVERT_EXTS = ['.pdf', '.docx', '.pptx']
 MARKITDOWN = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'markitdown-venv', 'Scripts', 'markitdown.exe')
 # Cakupan bawaan search: vault memori. Folder lain yang diindeks dicari lewat --root, supaya hasilnya tidak tercampur.
-VAULT = r"D:\Obsidian\All Sources\AI Workspace"
+# Path-nya dibaca dari AGENT_VAULT atau registry aturan (tools/lokasi.py), bukan ditanam di sini.
+VAULT = lokasi.vault()
 DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'rag_db')
 # Hash isi tiap file per folder yang diindeks: dasar index inkremental (2026-10-15). Juga dibaca vault_lint.py.
 MANIFEST = os.path.join(DB_DIR, 'manifest.json')
@@ -212,6 +214,9 @@ class OnnxE5:
         pad = self.tok.token_to_id("<pad>")
         self.tok.enable_padding(**({"pad_id": pad, "pad_token": "<pad>"} if pad is not None else {}))
         self.sesi = ort.InferenceSession(path, providers=["CPUExecutionProvider"])
+        # Ekspor ONNX resmi di repo Hugging Face model ini (dipakai pasang.py) juga meminta token_type_ids, yang untuk
+        # satu kalimat selalu nol. Ekspor lokal lewat `onnx` di bawah tidak memintanya.
+        self.tipe = "token_type_ids" in {i.name for i in self.sesi.get_inputs()}
 
     def encode(self, texts, normalize_embeddings=True, batch_size=32):
         import numpy as np
@@ -224,7 +229,10 @@ class OnnxE5:
             enc = self.tok.encode_batch([texts[j] for j in idx])
             ids = np.array([e.ids for e in enc], dtype=np.int64)
             mask = np.array([e.attention_mask for e in enc], dtype=np.int64)
-            h = self.sesi.run(None, {"input_ids": ids, "attention_mask": mask})[0]
+            masukan = {"input_ids": ids, "attention_mask": mask}
+            if self.tipe:
+                masukan["token_type_ids"] = np.zeros_like(ids)
+            h = self.sesi.run(None, masukan)[0]
             v = (h * mask[..., None]).sum(1) / np.maximum(mask.sum(1, keepdims=True), 1)
             out[idx] = v / np.linalg.norm(v, axis=1, keepdims=True) if normalize_embeddings else v
         return out
@@ -342,13 +350,15 @@ def main():
     parser.add_argument("--k", type=int, default=10, help="Jumlah halaman yang ditampilkan")
     parser.add_argument("--full", action="store_true", help="index: bangun ulang semua chunk folder ini, abaikan manifest")
     parser.add_argument("--no-refresh", action="store_true", help="search: jangan segarkan index walau ada file yang berubah")
-    parser.add_argument("--root", default=VAULT, help='search: folder akar yang dicari, mis. "D:/KULIAH/MATA KULIAH/SEM 5" '
-                                                      '(bawaan: vault); "all" untuk semua folder yang diindeks')
+    parser.add_argument("--root", default=VAULT, help='search: folder akar yang dicari, mis. "D:/Materi/Semester 5" '
+                                                      '(bawaan: vault dari AGENT_VAULT atau Konfigurasi/rule_sync.json); "all" untuk semua folder yang diindeks')
     args = parser.parse_args()
     if args.action == "onnx":
         return ekspor_onnx()
     if args.action != "status" and not args.target:
         parser.error(f"'{args.action}' butuh target (folder atau kata kunci)")
+    if args.action == "search" and not args.root:
+        parser.error("vault belum diketahui: beri --root <folder>, isi AGENT_VAULT, atau jalankan pasang.py")
 
     manifest = load_manifest()
     stale = manifest.get("format") != INDEX_FORMAT   # dihitung sekali: save_manifest menimpanya setelah folder pertama

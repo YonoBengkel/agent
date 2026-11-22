@@ -1,0 +1,4 @@
+# Berkas Obsidian yang berubah setiap kali vault dibuka, tidak perlu dicadangkan.
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.trash/

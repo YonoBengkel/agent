@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Halaman cacat</title>
+<link rel="icon" href="data:,">
+<style>
+  body { font-family: sans-serif; margin: 16px; }
+  .lebar { width: 500px; background: #eee; }
+  .pudar { color: #c8c8c8; background: #fff; }
+  .kecil { width: 20px; height: 20px; padding: 0; }
+  .gulir { overflow-x: auto; }
+  .gulir div { width: 900px; }
+</style>
+</head>
+<body>
+  <h1>Halaman cacat untuk tes</h1>
+  <div class="lebar">Kotak 500 px yang meluber di layar 360 px</div>
+  <p class="pudar">Teks abu-abu muda yang kontrasnya rendah</p>
+  <button class="kecil" aria-label="Tutup">x</button>
+  <button></button>
+  <div class="gulir"><div>Tabel lebar di dalam wadah gulir, bukan luberan halaman</div></div>
+  <p>Terjadi error saat menyimpan.</p>
+  <script>
+    console.error('galat uji');
+    fetch('/api/data').catch(() => {});
+  </script>
+</body>
+</html>

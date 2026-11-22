@@ -59,7 +59,7 @@ def rag_staleness(vault):
     return [r for r, h in current.items() if known.get(r) != h], [r for r in known if r not in current]
 
 TICK = re.compile(r"`([^`\n]+)`")
-PATH_ROOTS = ("log/", "wiki/", "ai workspace/", "tools/", "konfigurasi/", "riwayat perckapan/", ".claude/", ".agents/", "9router/", "d:/")
+PATH_ROOTS = ("log/", "wiki/", "tools/", "konfigurasi/", "riwayat perckapan/", ".claude/", ".agents/", "9router/", "d:/")
 RETIRED = ("Recycle Bin", "dipensiunkan", "pensiun", "SUPERSEDED", "~~")
 MARKER = re.compile(r"⚠️?\s*SUPERSEDED\s+(\d{4}-\d{2}-\d{2})")   # penanda Aturan 10 yang bertanggal, bukan templatnya
 ISTILAH = re.compile(r"(?i)istilah pensiun\s*:(.*)")
@@ -140,18 +140,21 @@ def guard_log(folder, month=None):
 def stale_paths(pages, text, bases):
     """Verifikasi rujukan saat dipakai (ide sistem memori GitHub Copilot, 2026-10-16): path di dalam backtick pada
     halaman yang bicara masa kini, yang tidak ada lagi di disk. Path relatif dicoba terhadap setiap folder di `bases`.
-    Baris yang menandai sesuatu sudah pensiun dilewati; log tidak dicek karena mencatat keadaan saat itu."""
+    Baris yang menandai sesuatu sudah pensiun dilewati; log tidak dicek karena mencatat keadaan saat itu. Path yang diawali
+    nama folder vault (bases[0]), misalnya `Memori Agent/Wiki/x.md`, dicari dari dalam vault."""
     found = []
+    awal_vault = os.path.basename(os.path.normpath(bases[0])).lower() + "/" if bases else None
+    roots = PATH_ROOTS + ((awal_vault,) if awal_vault else ())
     for p in pages:
         for line in text[p].splitlines():
             if any(r in line for r in RETIRED):
                 continue
             for raw in TICK.findall(line):
                 s = re.sub(r":\d+$", "", raw.strip().replace("\\", "/")).rstrip("/")
-                if not s.lower().startswith(PATH_ROOTS) or any(c in s for c in "<>*{}$|…"):
+                if not s.lower().startswith(roots) or any(c in s for c in "<>*{}$|…"):
                     continue
-                if s.lower().startswith("ai workspace/"):
-                    s = s[len("ai workspace/"):]
+                if awal_vault and s.lower().startswith(awal_vault):
+                    s = s[len(awal_vault):]
                 tries = [s, s.split(" ")[0]]   # perintah lengkap: cukup argumen pertamanya yang harus ada
                 if not any(os.path.exists(t if re.match(r"(?i)d:/", t) else os.path.join(b, t)) for t in tries for b in bases):
                     found.append((p, raw))
@@ -216,7 +219,7 @@ def project_activity(vault, projects_root, pages, active_days=14, skip=("AI Agen
         changed = latest_mtime(folder)
         if changed is None:
             continue
-        if name not in pages:   # folder mata kuliah dicatat di Log/Kuliah/<nama> (D:\KULIAH\AGENTS.md), itu dihitung tercatat
+        if name not in pages:   # folder mata kuliah dicatat di Log/Kuliah/<nama> (aturan folder kuliah), itu dihitung tercatat
             logged = name in mentioned or any(os.path.isdir(os.path.join(vault, l)) for l in (f"Log/{name}", f"Log/Kuliah/{name}"))
             if not logged and time.time() - changed < active_days * 86400:
                 unpaged.append((name, day(changed)))
@@ -286,7 +289,7 @@ def md_files(vault):
 
 def main():
     parser = argparse.ArgumentParser(description="Lint vault Obsidian (Aturan 11). Hanya melapor, tidak mengubah apa pun.")
-    parser.add_argument("vault", help="Path vault, mis. D:/Obsidian/All Sources/AI Workspace")
+    parser.add_argument("vault", help="Path vault, mis. D:/Obsidian/Memori Agent")
     parser.add_argument("--config", action="append", default=[], help="File JSON yang dicek validitasnya (boleh diulang)")
     parser.add_argument("--secrets-from", action="append", default=[], help="File konfigurasi; nilai secret-nya dicari di vault (Aturan 9)")
     parser.add_argument("--top", type=int, default=15, help="Jumlah link putus teratas yang ditampilkan")
@@ -435,7 +438,7 @@ def main():
     section("File vault yang memuat nilai secret (Aturan 9)", [rel(p) for p in leaked])
     print("\nMetrik: pola `tools/vault_guard.py` (angka 16 digit, kata terlarang, assignment mirip secret) atas seluruh isi file. "
           "Menangkap juga tulisan yang lolos dari hook, misalnya lewat skrip atau agent tanpa hook.")
-    section("File vault yang memuat teks terlarang (protokol D:\\CODE, Always)", [f"{rel(p)}: {', '.join(f)}" for p, f in forbidden])
+    section("File vault yang memuat teks terlarang (protokol folder kerja, Always)", [f"{rel(p)}: {', '.join(f)}" for p, f in forbidden])
     log_penjaga = guard_log(vault_guard.folder_log())
     if log_penjaga is None:
         print(f"\n## Log keputusan penjaga bulan ini — belum ada ({vault_guard.folder_log()})")
@@ -455,7 +458,7 @@ def main():
         section(f"Folder aktif ({args.active_days} hari) tanpa halaman proyek maupun folder log", [f"{n}: file {c}" for n, c in unpaged])
         print(f"\nMetrik: tanggal file non-.md terbaru di folder proyek dibanding tanggal `ARCHITECTURE.md`/`SCHEMA.md` di akar repo; "
               f"didaftar kalau kodenya lebih baru lebih dari {args.active_days} hari. Tanda untuk dicek, bukan bukti dokumennya salah.")
-        section("Dokumen proyek yang lebih tua dari kodenya (protokol D:\\CODE)", [f"{n}/{d}: kode {c}, dokumen {w}" for n, d, c, w in stale_docs(args.projects_root, args.active_days)])
+        section("Dokumen proyek yang lebih tua dari kodenya (protokol folder kerja)", [f"{n}/{d}: kode {c}, dokumen {w}" for n, d, c, w in stale_docs(args.projects_root, args.active_days)])
     print("\n## Tidak dicek skrip ini\n- Kontradiksi dan klaim basi antar-catatan: perlu dibaca agent.")
 
 if __name__ == "__main__":

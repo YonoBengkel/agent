@@ -2,8 +2,11 @@
 dijalankan persis seperti di konfigurasinya, dengan payload yang wajib ditolak lalu kembarannya yang wajib lolos (sejak 2026-11-13).
 
   python tools/uji_penjaga.py --claude-settings ~/.claude/settings.json --antigravity-hooks ~/.gemini/config/hooks.json
-         --hermes-config D:/Hermes/config.yaml [--hermes-doctor D:/Hermes/bin/hermes.exe]
-         [--vault "D:/Obsidian/All Sources/AI Workspace"] [--projects-root D:/CODE]
+         --hermes-config <HERMES_HOME>/config.yaml [--hermes-doctor <HERMES_HOME>/bin/hermes.exe]
+         [--vault <vault>] [--projects-root <folder kerja>]
+
+Bawaan --vault dan --projects-root dibaca dari AGENT_VAULT atau Konfigurasi/rule_sync.json dan dari induk workspace
+(tools/lokasi.py).
 
 test_tools.py menguji logika skrip penjaga. Alat ini menguji yang terpasang: baris perintah hook, pembungkus .cmd, Python di
 PATH, dan berkas argumennya, karena penjaga yang mati atau salah pasang selama ini tampak sama dengan kepatuhan sempurna.
@@ -34,6 +37,7 @@ import argparse
 import tempfile
 import subprocess
 from types import SimpleNamespace
+import lokasi
 
 PENJAGA = ("vault_guard", "penjaga_repo", "penjaga_desain")
 NIK = "Uji penjaga: NIK palsu 1234567890123456."  # angka palsu, hanya untuk dikenali penjaga
@@ -358,8 +362,8 @@ def main():
     p.add_argument("--hermes-config", help="config.yaml Hermes. Berkas ini memuat secret: hanya bagian hooks yang dibaca")
     p.add_argument("--hermes-doctor", metavar="HERMES", help="Path program hermes: ikut jalankan `hermes hooks doctor`, hanya ringkasannya dicetak. "
                                                          "Hook yang belum di-allowlist dihitung gagal")
-    p.add_argument("--vault", default="D:/Obsidian/All Sources/AI Workspace", help="Vault memori yang wajib dijaga")
-    p.add_argument("--projects-root", default="D:/CODE", help="Folder proyek tepercaya yang wajib dijaga")
+    p.add_argument("--vault", default=lokasi.vault(), help="Vault memori yang wajib dijaga (bawaan: AGENT_VAULT atau registry aturan)")
+    p.add_argument("--projects-root", default=lokasi.folder_kerja(), help="Folder proyek tepercaya yang wajib dijaga (bawaan: induk workspace)")
     p.add_argument("--lindung", help="Folder --protect untuk kasus wajib tolak. Bawaannya dibaca dari argumen --protect hook "
                                      "vault_guard yang terpasang. Hanya nama berkas acak yang tidak ada yang disebut")
     a = p.parse_args()
@@ -367,6 +371,8 @@ def main():
                                        ("hermes", a.hermes_config)) if v]
     if not konfigurasi:
         p.error("beri minimal satu dari --claude-settings, --antigravity-hooks, atau --hermes-config")
+    if not a.vault:
+        p.error("vault belum diketahui: beri --vault, isi AGENT_VAULT, atau jalankan pasang.py")
     vault, root = (x.replace("\\", "/").rstrip("/") for x in (a.vault, a.projects_root))
     lindung = (a.lindung or "").replace("\\", "/").rstrip("/") or None
     print(f"Uji penjaga terpasang. Vault: {vault}. Folder proyek: {root}.")

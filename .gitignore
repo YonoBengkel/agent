@@ -9,8 +9,16 @@
 !/README.md
 !/PETA_SKILLS_TOOLS.md
 !/PETA_PERAWATAN.md
+!/pasang.py
+!/.env.example
+# Templat kit: aturan, kerangka vault, dan skill yang lisensinya membolehkan disebarkan. Semuanya diperiksa
+# tools/cek_bersih.py sebelum terbit. Berkas yang dihasilkan pasang.py (aturan, Konfigurasi, skills, .env) tetap diabaikan.
+!/kit/
+/kit/**/__pycache__/
 !/tools/
 /tools/*
+!/tools/lokasi.py
+!/tools/cek_bersih.py
 !/tools/rag_engine.py
 !/tools/rag_eval.py
 !/tools/vault_lint.py

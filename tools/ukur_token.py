@@ -1,5 +1,5 @@
 """Alat ukur anggaran token mingguan (log vault 078: Q11 dan Q20, dibuat 2026-11-22). Menggabungkan dua skrip sekali
-pakai sesi Con-Fore, `tulis_cache.py` dan `beban_awal.py`. Hanya membaca angka usage, nama alat, nama skill, dan ukuran
+pakai dari sesi proyek lain, `tulis_cache.py` dan `beban_awal.py`. Hanya membaca angka usage, nama alat, nama skill, dan ukuran
 bagian prompt dari transkrip Claude Code, ditambah daftar connector dari data aplikasi desktop. Isi percakapan tidak
 pernah dicetak.
 

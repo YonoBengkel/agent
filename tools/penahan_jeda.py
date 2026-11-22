@@ -8,7 +8,7 @@ yang memenuhi syarat (log 079).
 
 Bawaannya hanya memperingatkan lewat systemMessage dan additionalContext. Dengan --tahan, pesan pertama sesudah jeda
 ditahan sekali (decision block), lalu pesan berikutnya di jeda yang sama lolos. Aplikasi desktop tidak menghapus pesan
-yang ditahan: teksnya tetap tampil di percakapan dengan tombol Edit prompt (diuji Ilham 2026-11-22). Pesan yang diawali
+yang ditahan: teksnya tetap tampil di percakapan dengan tombol Edit prompt (diuji 2026-11-22). Pesan yang diawali
 `#uji-tahan` selalu ditahan untuk menguji perilaku itu, tetapi kutipan yang memuatnya di tengah tidak. Pesan berisi
 `#lanjut` selalu lolos tanpa peringatan. Galat apa pun berarti lolos tanpa keluaran, supaya hook ini tidak pernah
 menghalangi kerja."""

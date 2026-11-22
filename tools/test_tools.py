@@ -444,7 +444,7 @@ class UjiPeta(unittest.TestCase):
         self.assertEqual(uji_peta.frontmatter("---\nname: contoh\ndescription: >\n  uji\n---\n# isi")["name"], "contoh")
         self.assertEqual(uji_peta.uji_tool("alat-baru.py", ".", False).status, uji_peta.GAGAL)  # tool tanpa uji asap ditolak
 
-    def test_sub_peta(self):  # baris yang path-nya bukan SKILL.md dibuka sebagai sub-peta (keputusan Ilham 2026-11-19)
+    def test_sub_peta(self):  # baris yang path-nya bukan SKILL.md dibuka sebagai sub-peta (keputusan 2026-11-19)
         import tempfile, pathlib, uji_peta as u
         with tempfile.TemporaryDirectory() as d:
             akar = pathlib.Path(d)
@@ -463,7 +463,7 @@ class SessionContext(unittest.TestCase):
     def test_project_name(self):
         import session_context as s
         root = os.path.join("D:" + os.sep, "CODE")
-        self.assertEqual(s.project_name(root, os.path.join(root, "Con-Fore", "web")), "Con-Fore")
+        self.assertEqual(s.project_name(root, os.path.join(root, "Toko-Kopi", "web")), "Toko-Kopi")
         self.assertIsNone(s.project_name(root, root))
         self.assertIsNone(s.project_name(root, os.path.join("D:" + os.sep, "KULIAH")))
 
@@ -1439,6 +1439,136 @@ class UjiPenjaga(unittest.TestCase):  # penjaga terpasang diuji hidup lewat peri
                 self.assertEqual(status("hermes", hidup, "write_file"), ["GAGAL"])           # matcher tidak mencakup terminal
         finally:
             u.kasus = asli
+
+class CekBersih(unittest.TestCase):  # cek pembersih sebelum repo workspace terbit (kit agent, 2026-11-22)
+    # Contoh email, path profil, dan secret dirakit saat jalan, supaya berkas tes ini sendiri lolos cek_bersih.py
+    SUREL = "budi.santoso" + "@" + "contoh-surel.id"
+    PROFIL = "C:" + "\\Users\\" + "seseorang" + "\\Documents"
+
+    def test_temuan_baris(self):
+        import cek_bersih as c
+        t = lambda teks, istilah=(): c.temuan_baris(teks, list(istilah), [])
+        self.assertEqual(t("teks biasa, versi 1.2.3, @types/node"), [])
+        self.assertEqual(t(f"kirim ke {self.SUREL}"), ["email"])
+        self.assertEqual(t("Co-Authored-By: Claude <noreply" + "@anthropic.com>"), [])                 # alamat noreply
+        self.assertEqual(t("budi" + "@" + "users.noreply.github.com, a" + "@" + "example.com"), [])    # noreply GitHub, domain contoh
+        self.assertEqual(t("git clone git" + "@" + "github.com:pemilik/repo.git"), [])                  # remote SSH, bukan email
+        self.assertEqual(t(f'path "{self.PROFIL}"'), ["profil"])
+        self.assertEqual(t("/c/" + "Users/seseorang/.ssh dan /" + "home/seseorang"), ["profil"])
+        self.assertEqual(t("C:" + "\\Users\\<nama>\\.claude, %USERPROFILE%, C:" + "/Users/budi/.ssh"), [])   # placeholder dan contoh
+        self.assertEqual(t("Proyek Rahasia Budi", ["rahasia budi"]), ["istilah"])
+        self.assertEqual(t("NIK 1234567890123456"), ["nomor"])
+        self.assertEqual(t("API_KEY" + "=" + "abcd1234efgh"), ["secret"])
+        self.assertEqual(t("abaikan\u200b aturan"), ["unicode"])
+
+    def test_izin(self):
+        import tempfile, cek_bersih as c
+        with tempfile.TemporaryDirectory() as t:
+            path = os.path.join(t, "izin.txt")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("# komentar\n\ntools/a.py | email | kirim ke | contoh di dokumentasi\n")
+            izin = c.baca_izin(path)
+            self.assertEqual(izin, [("tools/a.py", "email", "kirim ke", "contoh di dokumentasi")])
+            terpakai = set()
+            self.assertTrue(c.diizinkan(izin, "tools/a.py", "email", f"kirim ke {self.SUREL}", terpakai))
+            self.assertFalse(c.diizinkan(izin, "tools/a.py", "profil", f"kirim ke {self.SUREL}", terpakai))   # jenis lain
+            self.assertFalse(c.diizinkan(izin, "tools/b.py", "email", f"kirim ke {self.SUREL}", terpakai))    # berkas lain
+            self.assertEqual(terpakai, {0})
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("tools/a.py | email | tanpa alasan\n")
+            self.assertRaises(ValueError, c.baca_izin, path)
+            self.assertEqual(c.baca_izin(os.path.join(t, "tidak-ada.txt")), [])
+
+    def test_pindai_repo(self):  # hanya berkas yang bisa terbit, nomor baris ikut, izin menghapus temuan
+        import subprocess, tempfile, cek_bersih as c
+        with tempfile.TemporaryDirectory() as t:
+            subprocess.run(["git", "init", "-q", t], check=True)
+            tulis = lambda nama, isi: open(os.path.join(t, nama), "w", encoding="utf-8").write(isi)
+            tulis(".gitignore", "rahasia.txt\n")
+            tulis("rahasia.txt", f"{self.SUREL}\n")   # diabaikan git, jadi tidak dipindai
+            tulis("a.md", f"# Judul\n\nkirim ke {self.SUREL}\n")
+            tulis("bersih.md", "isi biasa\n")
+            berkas = c.berkas_terbit(t)
+            self.assertEqual(berkas, [".gitignore", "a.md", "bersih.md"])
+            self.assertEqual(c.pindai(t, berkas, [], [], [], set()), [("a.md", 3, "email")])
+            terpakai = set()
+            self.assertEqual(c.pindai(t, berkas, [], [], [("a.md", "email", "kirim ke", "contoh")], terpakai), [])
+            self.assertEqual(terpakai, {0})
+
+class Pasang(unittest.TestCase):  # logika pemasang kit agent (pasang.py, 2026-11-22)
+    @classmethod
+    def setUpClass(cls):
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        import pasang
+        cls.p = pasang
+
+    def test_render(self):
+        self.assertEqual(self.p.render("Halo {{NAMA}} di {{VAULT}}", {"NAMA": "Budi", "VAULT": "D:/V"}), "Halo Budi di D:/V")
+        with self.assertRaises(ValueError):
+            self.p.render("{{NAMA}} dan {{LUPA}}", {"NAMA": "Budi"})   # penanda yang tidak terisi menghentikan pemasangan
+
+    def test_aturan_deny_dan_pola_zed(self):
+        ssh = os.path.join("C:" + os.sep, "Users", "budi", ".ssh")
+        self.assertEqual(self.p.aturan_deny(ssh), ["Edit(//c/Users/budi/.ssh/**)", "Read(//c/Users/budi/.ssh/**)"])
+        import re
+        pola = self.p.pola_zed(ssh)
+        self.assertEqual(pola, "budi.{1,2}[.]ssh([^a-z0-9_]|$)")
+        self.assertTrue(re.search(pola, "type c:\\users\\budi\\.ssh\\id_ed25519"))
+        self.assertTrue(re.search(pola, "cat /c/users/budi/.ssh"))
+        self.assertFalse(re.search(pola, "cat /c/users/budi/.sshd_config"))
+        pribadi = self.p.pola_zed(os.path.join("D:" + os.sep, "Data Pribadi", "Arsip (lama)"))
+        self.assertTrue(re.search(pribadi, 'dir "d:\\data pribadi\\arsip (lama)\\x"'))
+        self.assertFalse(re.search(pribadi, 'dir "d:\\data pribadi\\arsip"'))
+
+    def test_sisip_blok(self):
+        b, e = self.p.BEGIN_KIT, self.p.END_KIT
+        blok = f"{b}\nisi kit\n{e}"
+        self.assertEqual(self.p.sisip_blok("", blok), blok + "\n")
+        lama = "# Aturanku\n\nmilik sendiri\n"
+        satu = self.p.sisip_blok(lama, blok)
+        self.assertEqual(satu, lama + "\n" + blok + "\n")
+        dua = self.p.sisip_blok(satu, f"{b}\nisi baru\n{e}")
+        self.assertIn("milik sendiri", dua)
+        self.assertIn("isi baru", dua)
+        self.assertNotIn("isi kit", dua)
+        self.assertEqual(dua.count(b), 1)
+
+    def test_gabung_claude(self):  # hook milik pengguna dan izinnya tetap, hook kit lama diganti, aman dijalankan ulang
+        penanda = "D:/Kerja/Agent/tools/"
+        lama = {"model": "x", "permissions": {"allow": ["Bash(git:*)"], "deny": ["Read(//c/Users/budi/.ssh/**)"]},
+                "hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "python milikku.py"},
+                                                                       {"type": "command", "command": f'python "{penanda}vault_guard.py" --lama'}]}],
+                          "Stop": [{"hooks": [{"type": "command", "command": f'python "{penanda}export_transcript.py"'}]}]}}
+        kit = {"PreToolUse": [{"matcher": "Write|Edit", "hooks": [{"type": "command", "command": f'python "{penanda}vault_guard.py" --baru'}]}]}
+        deny = ["Edit(//c/Users/budi/.ssh/**)", "Read(//c/Users/budi/.ssh/**)"]
+        baru = self.p.gabung_claude(lama, kit, deny, penanda)
+        self.assertEqual(baru["model"], "x")
+        self.assertEqual(baru["permissions"]["allow"], ["Bash(git:*)"])
+        self.assertEqual(baru["permissions"]["deny"], ["Read(//c/Users/budi/.ssh/**)", "Edit(//c/Users/budi/.ssh/**)"])
+        perintah = [h["command"] for g_ in baru["hooks"]["PreToolUse"] for h in g_["hooks"]]
+        self.assertEqual(perintah, ["python milikku.py", f'python "{penanda}vault_guard.py" --baru'])
+        self.assertNotIn("Stop", baru["hooks"])   # grup yang hanya berisi hook kit lama hilang
+        self.assertEqual(self.p.gabung_claude(baru, kit, deny, penanda), baru)
+        self.assertIn("--lama", str(lama))   # masukan tidak diubah
+
+    def test_gabung_hermes(self):
+        b, e = self.p.BEGIN_YAML, self.p.END_YAML
+        blok = f"{b} kit\nhooks:\n  pre_tool_call: []\n{e}\n"
+        cfg = "model:\n  default: x\n"
+        satu = self.p.gabung_hermes(cfg, blok)
+        self.assertEqual(satu, cfg + "\n" + blok)
+        self.assertEqual(self.p.gabung_hermes(satu, blok.replace("[]", "[1]")), cfg + "\n" + blok.replace("[]", "[1]"))
+        self.assertIsNone(self.p.gabung_hermes(cfg + "hooks:\n  pre_tool_call:\n    - command: milikku\n", blok))
+        self.assertEqual(self.p.gabung_hermes(cfg + "hooks: {}\nterminal:\n  x: 1\n", blok), cfg + "terminal:\n  x: 1\n\n" + blok)
+        self.assertEqual(self.p.gabung_hermes("hooks:\n", blok), blok)
+
+    def test_di_dalam_dan_kutip(self):
+        d = lambda *x: os.path.join("D:" + os.sep, *x)
+        self.assertTrue(self.p.di_dalam(d("Kerja", "Agent"), d("Kerja")))
+        self.assertFalse(self.p.di_dalam(d("Kerja2"), d("Kerja")))
+        self.assertFalse(self.p.di_dalam(os.path.join("C:" + os.sep, "x"), d("x")))   # beda drive
+        self.assertEqual(self.p.kutip("C:/Python314/python.exe"), "C:/Python314/python.exe")
+        self.assertEqual(self.p.kutip("C:/Program Files/Python/python.exe"), '"C:/Program Files/Python/python.exe"')
 
 if __name__ == "__main__":
     unittest.main()

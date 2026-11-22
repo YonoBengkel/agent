@@ -204,7 +204,7 @@ def buka_db(path):
 
 def ekspor_lain(args, secrets):
     """Mode --format antigravity atau hermes: ekspor semua percakapan yang folder kerjanya proyek di bawah --projects-root.
-    Proyek .no-vault, proyek yang sudah tidak ada, dan folder di luar root (misalnya D:\\KULIAH) dilewati tanpa dibaca."""
+    Proyek .no-vault, proyek yang sudah tidak ada, dan folder di luar root (misalnya folder materi kuliah) dilewati tanpa dibaca."""
     tulis = lewat = 0
     def proyek(path):
         folder = project_of(path, args.projects_root, set(args.skip)) if path else None

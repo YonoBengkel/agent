@@ -1,0 +1,32 @@
+# Temuan tools/cek_bersih.py yang memang wajar. Format: path | jenis | cuplikan | alasan
+# Temuan berjenis itu di baris berkas itu yang memuat cuplikan dilewati. Cuplikan dipilih supaya tetap cocok walau
+# barisnya berpindah, dan tidak memuat nilai utuhnya, supaya berkas ini sendiri lolos cek. Izin yang tidak terpakai
+# lagi dilaporkan IZIN BASI: hapus barisnya.
+
+# Definisi pola dan nama variabel yang kebetulan mirip assignment secret
+tools/cadangkan_vault.py | secret | # sama dengan vault_lint.py | definisi pola secret
+tools/export_transcript.py | secret | (?:SECRET|PASSWORD|PASSWD|TOKEN|API_KEY) | definisi pola secret
+tools/oper_kerja.py | secret | known_secrets(a.secrets_from) | nama variabel, bukan nilai
+tools/rag_engine.py | secret | re.compile(r"\w+", re.UNICODE) | pola kata untuk BM25
+tools/rag_eval.py | secret | re.compile(r"\w+", re.UNICODE) | pola kata untuk BM25
+tools/ukur_token.py | secret | = ukuran_prompt(usage) | nama variabel, bukan nilai
+
+# Data palsu di tes dan uji penjaga
+tools/test_tools.py | nomor | 123456789012345 | NIK palsu untuk menguji penjaga
+tools/test_tools.py | nomor | "scale": 1.05427 | angka pengaturan grafik yang mirip NIK, kasus uji
+tools/test_tools.py | secret | g.reasons("JWT_SECRET= | secret palsu untuk menguji penjaga
+tools/test_tools.py | secret | <USER_REQUEST>halo API_KEY= | secret palsu di transkrip uji
+tools/test_tools.py | secret | default: gemini/uji-1 | secret palsu di config Hermes uji
+tools/test_tools.py | secret | rahasia-uji-111 | secret palsu di config Hermes uji
+tools/test_tools.py | secret | rahasia-uji-222 | secret palsu di config Hermes uji
+tools/test_tools.py | unicode | g.invisible( | kasus uji Unicode tak terlihat
+tools/test_tools.py | unicode | blok.format("aturan | kasus uji Unicode tak terlihat di sumber aturan
+tools/uji_penjaga.py | nomor | NIK palsu 123456789012345 | NIK palsu untuk uji hidup penjaga
+tools/test_tools.py | gitleaks:generic-api-key | g.reasons("JWT_SECRET= | secret palsu untuk menguji penjaga
+tools/test_tools.py | gitleaks:generic-api-key | 2fcdb9d23564f66267e7fca77ca6dc657dff0a40:tools/test_tools.py:generic-api-key:36 | secret palsu yang sama di riwayat git
+
+# Pendeteksi Unicode tak terlihat memuat karakter yang dideteksinya
+tools/vault_guard.py | unicode | TAK_TERLIHAT = re.compile( | daftar karakter yang dideteksi
+tools/vault_guard.py | unicode | and i == 0: | BOM di awal teks dibiarkan
+tools/vault_guard.py | unicode | EMOJI.match(before) | ZWJ di emoji gabungan dibiarkan
+tools/vault_lint.py | unicode | FRONTMATTER = re.compile( | BOM opsional sebelum frontmatter

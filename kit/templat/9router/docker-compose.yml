@@ -1,0 +1,25 @@
+# 9Router: router LLM lokal yang dipakai Hermes (dan agent lain yang mendukung endpoint OpenAI).
+# Ditulis pasang.py dari kit agent. Secret-nya tidak ada di sini, tapi di .env workspace.
+# Nyalakan:  docker compose --env-file ../.env up -d     (dari folder 9router ini)
+# Matikan:   docker compose --env-file ../.env down
+# 9Router buatan pihak ketiga (image decolua/9router). Periksa sendiri sebelum dipakai.
+services:
+  9router:
+    image: decolua/9router:latest
+    container_name: 9router
+    restart: "no"
+    ports:
+      - "127.0.0.1:20128:20128"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - PORT=20128
+      - JWT_SECRET=${NINEROUTER_JWT_SECRET:?isi NINEROUTER_JWT_SECRET di .env}
+      - INITIAL_PASSWORD=${NINEROUTER_INITIAL_PASSWORD:?isi NINEROUTER_INITIAL_PASSWORD di .env}
+      - API_KEY_SECRET=${NINEROUTER_API_KEY_SECRET:?isi NINEROUTER_API_KEY_SECRET di .env}
+      - NODE_ENV=production
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:20128/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

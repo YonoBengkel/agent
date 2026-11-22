@@ -377,7 +377,7 @@ BAGI_PS = ("$m = New-Object IO.MemoryStream; [Console]::OpenStandardInput().Copy
 
 def bagi_ps(command):
     """Semua kata / di perintah PowerShell ini operator bagi menurut pengurai PowerShell sendiri (salah tolak 2026-11-21 di
-    Barcelona). Di mode argumen perintah / tetap akar drive (Get-ChildItem /, rg x /), dan bedanya hanya terbaca pengurai itu.
+    sesi proyek lain). Di mode argumen perintah / tetap akar drive (Get-ChildItem /, rg x /), dan bedanya hanya terbaca pengurai itu.
     Satu / yang bukan token Divide, atau pengurai yang gagal atau lewat 5 detik, berarti / tetap dinilai sebagai path."""
     posisi = [len(command[:m.start()].encode("utf-16-le")) // 2 for m in SHELL_PIECE.finditer(command) if clean(m.group()) == "/"]
     try:
@@ -396,7 +396,7 @@ def opened(hook, folders):
     ti = hook.get("tool_input") or {}
     tool, base = hook.get("tool_name"), str(hook.get("cwd") or os.getcwd())
     if tool in SHELL_LAIN and isinstance(ti, dict):   # description Bash dan PowerShell Claude hanya label untuk pengguna dan
-        ti = {k: v for k, v in ti.items() if k != "description"}   # tidak dijalankan (salah tolak 2026-11-20 di Data Slayer)
+        ti = {k: v for k, v in ti.items() if k != "description"}   # tidak dijalankan (salah tolak 2026-11-20 di sesi proyek lain)
     texts = [] if tool in WRITE_TOOLS else leaves(ti)
     found = [f for f in folders if any(opens(t, f) for t in texts)]
     if tool in ("terminal", *SHELL_LAIN):
@@ -549,7 +549,7 @@ def main():
         if found:
             catat("deny", ", ".join(found), hit[0])   # kategori saja, bukan teks yang ditolak
             return keluar(fmt, "deny", f"Ditolak penjaga vault: tulisan ke {hit[0]} memuat {', '.join(found)}. "
-                          "Ganti bagian itu dengan penanda seperti <nik> atau <nama> (protokol D:\\CODE, bagian Always).")
+                          "Ganti bagian itu dengan penanda seperti <nik> atau <nama> (protokol folder kerja, bagian Always).")
         pola = injeksi(new_text(ti))   # dilaporkan ke log, tidak ditolak (riset 2026-11-13, M5)
         if pola:
             catat("lapor", "pola injeksi: " + ", ".join(sorted({k for k, _ in pola})), hit[0])

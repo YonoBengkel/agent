@@ -138,14 +138,15 @@ def bagian_sekarang(text, page):
     return f"{pembuka}\n\n{m.group(0).rstrip()}{sisa}"
 
 def project_context(root, vault, project, sekarang=False):
-    """Mode proyek (D:\\CODE\\AGENTS.md): muat halaman proyek dari vault untuk folder kerja sesi ini. Dengan
+    """Mode proyek (protokol AGENTS.md di folder kerja): muat halaman proyek dari vault untuk folder kerja sesi ini. Dengan
     `sekarang`, halaman yang punya bagian `## Sekarang` hanya dimuat bagian itu (saat percontohan hanya Claude Code)."""
     folder = os.path.join(os.path.abspath(root), project)
+    protokol = os.path.join(os.path.abspath(root), "AGENTS.md")   # protokol folder kerja, di mesin mana pun
     if os.path.exists(os.path.join(folder, ".no-vault")):
-        return f"Proyek `{project}` memakai `.no-vault`: jangan membaca atau menulis catatan vault untuk proyek ini (D:\\CODE\\AGENTS.md)."
+        return f"Proyek `{project}` memakai `.no-vault`: jangan membaca atau menulis catatan vault untuk proyek ini ({protokol})."
     vault = os.path.normpath(vault)
     page = os.path.join(vault, "Wiki", "projects", project + ".md")
-    head = f"Konteks proyek `{project}` ({folder}), dimuat otomatis di awal sesi sesuai D:\\CODE\\AGENTS.md."
+    head = f"Konteks proyek `{project}` ({folder}), dimuat otomatis di awal sesi sesuai {protokol}."
     design = design_line(vault, project)
     top = f"\n\n{design}" if design else ""
     try:

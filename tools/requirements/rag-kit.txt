@@ -1,0 +1,7 @@
+# rag-venv versi kit, Python 3.10 sampai 3.14. Pasang ulang: python -m venv tools/rag-venv && tools/rag-venv/Scripts/python.exe -m pip install -r tools/requirements/rag-kit.txt
+# Dipasang pasang.py. Tanpa torch dan sentence-transformers: embedding lewat ekspor ONNX resmi model, yang diunduh pasang.py.
+# Rentang, bukan versi tetap, karena tidak ada satu versi numpy dan onnxruntime yang punya wheel untuk 3.10 sampai 3.14.
+chromadb>=1.5.9,<2
+onnxruntime>=1.23,<2
+tokenizers>=0.22,<1
+numpy>=2.2,<3

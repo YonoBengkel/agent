@@ -21,6 +21,7 @@ import sys
 import tempfile
 
 import vault_guard  # pola Unicode tak terlihat yang sama dengan vault_lint.py (riset 2026-11-13)
+import lokasi
 
 AKAR = pathlib.Path(__file__).resolve().parents[1]
 TEKS = (".md", ".py", ".js", ".mjs", ".json", ".txt", ".yaml", ".yml", ".html", ".css", ".sh", ".ps1")
@@ -64,7 +65,7 @@ def baca_peta(teks):
 
 def buka_sub_peta(skill, akar_skill):
     """Baris skill yang path-nya bukan SKILL.md menunjuk ke sub-peta, misalnya `animate/animate.md`. Peta utama cukup
-    satu baris per kelompok, rinciannya dibaca saat perlu (keputusan Ilham 2026-11-19). Skill di tabel bagian 1
+    satu baris per kelompok, rinciannya dibaca saat perlu (keputusan 2026-11-19). Skill di tabel bagian 1
     sub-peta diuji seperti skill di peta utama. Mengembalikan daftar skill yang sudah diurai dan hasil per sub-peta."""
     hasil, sub = [], []
     for nama, path in skill:
@@ -226,6 +227,9 @@ def uji_tool(nama, vault, berat):
         elif nama == "cek_jurnal.py":
             k, o = jalan([py, "-B", "tools/cek_jurnal.py", "--help"])
             ok, pesan = k == 0 and "projects-root" in o, "--help. Logikanya diuji test_tools.py, jalur hook sungguhan diuji di sesi"
+        elif nama == "cek_bersih.py":
+            k, o = jalan([py, "-B", "tools/cek_bersih.py", "--help"])
+            ok, pesan = k == 0 and "istilah" in o, "--help. Logikanya diuji test_tools.py, pindaian penuhnya dijalankan sebelum komit"
         elif nama == "medusa":
             k, o = jalan([AKAR / "tools" / "medusa-venv" / "Scripts" / "medusa.exe", "--version"])
             ok, pesan = k == 0 and "MEDUSA" in o, "hanya --version. Pindaian penuh berat untuk RAM mesin ini"
@@ -255,7 +259,7 @@ def main():
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     p = argparse.ArgumentParser(description="Uji setiap skill dan tool di peta kemampuan.")
     p.add_argument("--peta", default=str(AKAR / "PETA_SKILLS_TOOLS.md"))
-    p.add_argument("--vault", default=r"D:\Obsidian\All Sources\AI Workspace")
+    p.add_argument("--vault", default=lokasi.vault(), help="Vault memori (bawaan: AGENT_VAULT atau registry aturan)")
     p.add_argument("--berat", action="store_true", help="Ikut menjalankan uji yang lama (uji pagar oper-kerja)")
     p.add_argument("--laporan", help="Tulis tabel hasil ke berkas Markdown ini")
     a = p.parse_args()

@@ -1,0 +1,11 @@
+# Daftar kata terlarang untuk tools\vault_guard.py (hook penjaga vault di setiap agent).
+# File ini lokal dan tidak masuk git. Jangan salin isinya ke vault, log, atau file yang di-commit.
+#
+# Satu entri per baris, tidak peka huruf besar-kecil, dicocokkan sebagai potongan teks.
+# Baris yang diawali # dilewati. Berkas ini harus ada: kalau hilang, penjaga gagal membaca dan
+# semua tulisan ke vault ditolak supaya aman.
+#
+# Data kamu sendiri (nama lengkap, nomor induk, nilai) boleh masuk vault, jadi jangan dimasukkan
+# ke sini. Isi hanya dengan hal yang tetap dilarang dan tidak tertangkap pola, misalnya nama orang
+# yang datanya tidak boleh dicatat, atau nama proyek atau klien yang dinyatakan rahasia.
+# Nomor mirip NIK (16 digit) dan nilai secret dari .env sudah ditangkap tanpa daftar ini.

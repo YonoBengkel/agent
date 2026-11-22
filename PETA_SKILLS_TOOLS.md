@@ -1,33 +1,34 @@
 # Peta Skills dan Tools AI Agent
 
 > Pustaka tunggal pemetaan kemampuan (skills dan tools) lintas operator (Claude Code, Antigravity IDE, Zed, Hermes Agent, OpenCode).
-> Rujukan utama saat Ilham meminta: "gunakan skills/tools yang necessary" atau saat tugas membutuhkan kemampuan spesifik.
+> Rujukan utama saat pengguna meminta: "gunakan skills/tools yang necessary" atau saat tugas membutuhkan kemampuan spesifik.
 
-Semua skill dan tools disimpan secara terpusat di `D:\CODE\AI Agent\skills\` dan `D:\CODE\AI Agent\tools\`.
-Folder `skills\` punya git sendiri (repo privat `YonoBengkel/agent-skills`), jadi perubahan skill dikomit dan di-push dari folder itu.
+Semua skill dan tools disimpan terpusat di folder `skills\` dan `tools\` workspace ini, yaitu folder tempat berkas ini berada. Path absolut workspace tertulis di protokol folder kerja (`<folder kerja>\AGENTS.md`).
+Folder `skills\` tidak ikut repo workspace. Di mesin pemilik ia repo git terpisah, sedangkan di mesin yang dipasang dari kit isinya disalin `pasang.py` dari `kit\skills\`.
 Prinsip kerja: **Just-in-Time (JIT)**. Agent membaca instruksi skill atau menjalankan tool hanya saat dibutuhkan agar hemat token dan menjaga context window tetap bersih.
 
 ---
 
 ## Cara Pemakaian oleh Agent
 
-1. **Cocokkan Kebutuhan**: Saat Ilham memberi instruksi atau tugas, cek tabel di bawah untuk menemukan skill atau tool yang relevan.
+1. **Cocokkan Kebutuhan**: Saat pengguna memberi instruksi atau tugas, cek tabel di bawah untuk menemukan skill atau tool yang relevan.
 2. **Baca Petunjuk (Just-in-Time)**: Baca berkas `SKILL.md` dari path yang tertera menggunakan tool baca berkas standar operator. Path yang bukan `SKILL.md` adalah sub-peta: baca dulu, lalu pilih satu skill di dalamnya.
-3. **Sebutkan ke Ilham**: satu kalimat, misalnya *"Menggunakan skill [nama] dari lumbung untuk [alasan ringkas]"*.
+3. **Sebutkan ke pengguna**: satu kalimat, misalnya *"Menggunakan skill [nama] dari lumbung untuk [alasan ringkas]"*.
 4. **Eksekusi**: Jalankan instruksi di dalam skill tersebut dengan cermat.
 5. **Efisiensi Token**: Muat hanya 1 skill yang paling tepat per sub-tugas, dan paling banyak 2 skill atau tool untuk satu tugas.
 
-Cara tiap operator mengakses skill dan tool, serta cara menambah atau mengubah baris peta, ada di `D:\CODE\AI Agent\PETA_PERAWATAN.md`. Berkas itu tidak perlu dibaca saat memilih skill.
+Cara tiap operator mengakses skill dan tool, serta cara menambah atau mengubah baris peta, ada di `PETA_PERAWATAN.md` di folder yang sama. Berkas itu tidak perlu dibaca saat memilih skill.
 
 ---
 
 ## 1. Peta Skills (Instruksi Kerja Mandiri)
 
-Path relatif terhadap: `D:\CODE\AI Agent\skills\` (gunakan path absolut `D:\CODE\AI Agent\skills\<nama>\SKILL.md` saat membuka workspace proyek lain)
+Path relatif terhadap folder `skills\` workspace ini. Dari workspace proyek lain, gabungkan dengan path workspace yang tertulis di protokol folder kerja.
+Skill yang foldernya tidak ada di `skills\` tidak terpasang di mesin ini: katakan begitu, lalu lanjut tanpa skill itu. Kit hanya memasang enam skill: `grill-me`, `grilling`, `oper-kerja`, `obsidian-workflow`, `webapp-testing`, dan `webapp-audit` (asal dan lisensinya di `kit\skills\LISENSI.md`).
 
 ### A. Desain, Frontend & Antarmuka
 
-Sebelum memilih arah desain, buka halaman vault `Wiki\system\Referensi Desain.md`, daftar lengkap referensi desain kita (protokol `D:\CODE` sejak 2026-11-08).
+Sebelum memilih arah desain, buka halaman vault `Wiki\system\Referensi Desain.md`, daftar lengkap referensi desain kita (protokol folder kerja sejak 2026-11-08).
 
 | Nama Skill | Kapan Digunakan (Trigger) | Path Berkas | Operator |
 |---|---|---|---|
@@ -48,7 +49,7 @@ Sebelum memilih arah desain, buka halaman vault `Wiki\system\Referensi Desain.md
 | Nama Skill | Kapan Digunakan (Trigger) | Path Berkas | Operator |
 |---|---|---|---|
 | `grill-me` | Mematangkan rencana, arsitektur, atau keputusan teknis lewat wawancara tajam terstruktur | `grill-me/SKILL.md` | Universal |
-| `grilling` | Versi mendalam untuk menguji asumsi dan menemukan blind spot dalam rencana Ilham | `grilling/SKILL.md` | Universal |
+| `grilling` | Versi mendalam untuk menguji asumsi dan menemukan blind spot dalam rencana pengguna | `grilling/SKILL.md` | Universal |
 | `oper-kerja` | Mengoper tugas kode kecil yang jelas dan bisa diuji ke agent gratis (OpenCode, Hermes), supaya agent utama cukup merencanakan dan memeriksa | `oper-kerja/SKILL.md` | Universal, perlu terminal |
 
 ### C. Dokumen, Data Science & Rekayasa
@@ -68,7 +69,7 @@ Sebelum memilih arah desain, buka halaman vault `Wiki\system\Referensi Desain.md
 | Nama Skill | Kapan Digunakan (Trigger) | Path Berkas | Operator |
 |---|---|---|---|
 | `obsidian-workflow` | Mengelola catatan vault Obsidian, struktur link, log sesi, dan konsep wiki | `obsidian-workflow/SKILL.md` | Universal |
-| `microsoft-onenote` | Membaca dan mencari catatan di Microsoft OneNote milik Ilham via CLI | `microsoft-onenote/SKILL.md` | Universal |
+| `microsoft-onenote` | Membaca dan mencari catatan di Microsoft OneNote pengguna via CLI | `microsoft-onenote/SKILL.md` | Universal |
 | `web-browser` | Mengambil dan memeriksa isi halaman web atau endpoint API tanpa browser GUI berat | `web-browser/SKILL.md` | Universal |
 
 ### E. Pengujian & Audit Aplikasi Web
@@ -82,25 +83,26 @@ Sebelum memilih arah desain, buka halaman vault `Wiki\system\Referensi Desain.md
 
 ## 2. Peta Tools CLI (Perkakas Skrip)
 
-Path relatif terhadap: `D:\CODE\AI Agent\tools\`
+Path relatif terhadap folder workspace ini. `<vault>` dan `<folder kerja>` adalah path yang dipakai saat pemasangan, tertulis di protokol folder kerja.
 
 | Nama Tool | Kebutuhan / Fungsi | Perintah Eksekusi |
 |---|---|---|
-| `rag_engine.py` | Pencarian semantik hybrid di vault catatan atau materi kuliah | `tools\rag-venv\Scripts\python.exe tools\rag_engine.py search "<kata>" [--root <folder>]` |
-| `vault_lint.py` | Cek integritas vault (link putus, file kosong, secret bocor, Unicode tak terlihat, dokumen proyek basi) | `python tools\vault_lint.py "D:/Obsidian/All Sources/AI Workspace"` |
-| `sync_rules.py` | Sinkronisasi aturan lintas agent (Claude, Antigravity, OpenCode) | `python tools\sync_rules.py` (tulis) atau `--check` (lapor) |
+| `rag_engine.py` | Pencarian semantik hybrid di vault catatan atau folder dokumen lain | `tools\rag-venv\Scripts\python.exe tools\rag_engine.py search "<kata>" [--root <folder>]` |
+| `vault_lint.py` | Cek integritas vault (link putus, file kosong, secret bocor, Unicode tak terlihat, dokumen proyek basi) | `python tools\vault_lint.py <vault>` |
+| `sync_rules.py` | Sinkronisasi aturan lintas agent (Claude, Antigravity, Zed, Hermes) | `python tools\sync_rules.py` (tulis) atau `--check` (lapor) |
 | `markitdown` | Mengubah dokumen (PDF, Word, PPT), YouTube, atau audio menjadi Markdown | `tools\markitdown-venv\Scripts\markitdown.exe <file> -o <file.md>` |
 | `pdf_parser.py` | Parsing PDF berstruktur kompleks menjadi Markdown | `tools\opendataloader-venv\Scripts\python.exe tools\pdf_parser.py <file.pdf> --output <folder>` |
-| `design_lint.mjs` | Linter anti-AI-slop untuk berkas HTML/CSS | `node "D:/CODE/AI Agent/tools/design-kit/design_lint.mjs" <file.html>` |
-| `export_transcript.py` | Ekspor transkrip percakapan ke Markdown dengan sensor secret. `--format antigravity` atau `hermes` mengekspor semua percakapan proyek `D:\CODE` dari data agent itu, dijalankan saat kompilasi | `python tools\export_transcript.py <file.jsonl> --out <folder>`, atau `--format antigravity --app-dir <folder data> --projects-root D:/CODE --out <folder>` |
-| `uji_agen.py` | Canary lintas agent (Antigravity, Hermes): tugas uji yang sama di repo biasa dan repo `.no-vault`, skor N dari M dihitung skrip | `python tools\uji_agen.py siapkan --root D:/CODE`, lalu `jalan agy a --root D:/CODE --vault <vault> --hasil <berkas.jsonl>`, `skor --hasil <berkas.jsonl>`, `bersihkan --root D:/CODE` |
+| `design_lint.mjs` | Linter anti-AI-slop untuk berkas HTML/CSS | `node tools\design-kit\design_lint.mjs <file.html>` |
+| `export_transcript.py` | Ekspor transkrip percakapan ke Markdown dengan sensor secret. `--format antigravity` atau `hermes` mengekspor semua percakapan proyek di folder kerja dari data agent itu, dijalankan saat kompilasi | `python tools\export_transcript.py <file.jsonl> --out <folder>`, atau `--format antigravity --app-dir <folder data> --projects-root <folder kerja> --out <folder>` |
+| `uji_agen.py` | Canary lintas agent (Antigravity, Hermes): tugas uji yang sama di repo biasa dan repo `.no-vault`, skor N dari M dihitung skrip | `python tools\uji_agen.py siapkan --root <folder kerja>`, lalu `jalan agy a --root <folder kerja> --vault <vault> --hasil <berkas.jsonl>`, `skor --hasil <berkas.jsonl>`, `bersihkan --root <folder kerja>` |
 | `cek_proses_sisa.py` | Daftar proses alat sisa uji (server dev, uvicorn, Hermes, 9Router, agy, Docker, Playwright) beserta port dan asalnya. Di Claude jalan sendiri lewat hook Stop, agent lain menjalankannya manual sesudah uji | `python tools\cek_proses_sisa.py --sejak 3h` |
-| `putar_log.py` | Pindahkan entri bulan lalu dari `Wiki/log.md` dan `log_id.md` ke folder `Riwayat/` di vault. Dijalankan di langkah 1 Kompilasi | `python tools\putar_log.py --vault "D:/Obsidian/All Sources/AI Workspace"` (tulis) atau `--cek` (lapor) |
-| `cadangkan_vault.py` | Cadangkan vault ke repo git privatnya: pindai semua berkas teks (secret, kata terlarang, nomor identitas), lalu gitleaks sebagai gerbang kedua, dan commit serta push hanya kalau bersih. Dijalankan di langkah terakhir Kompilasi | `python tools\cadangkan_vault.py --vault "D:/Obsidian/All Sources/AI Workspace" --words Konfigurasi\penjaga_vault_terlarang.txt --secrets-from 9router\docker-compose.yml --gitleaks "D:/Repo Luar/gitleaks/gitleaks_8.30.1/gitleaks.exe"` (atau `--cek`) |
-| `penjaga_repo.py` | Hook sebelum perintah shell: menolak clone repo pihak ketiga ke `D:\CODE` dan salinan dari `D:\Repo Luar\` ke sana, lalu menunjuk tujuan yang benar. Terpasang di Claude, Hermes, dan Antigravity | Dipasang sebagai hook (`--format claude`, `hermes`, atau `antigravity`), bukan dijalankan manual |
-| `uji_penjaga.py` | Uji hidup penjaga yang terpasang: perintah hook `vault_guard.py`, `penjaga_repo.py`, dan `penjaga_desain.py` di Claude, Antigravity, dan Hermes dijalankan persis seperti di konfigurasinya, dengan payload wajib tolak dan kembarannya yang wajib lolos. Keluar 1 kalau ada penjaga yang mati atau salah pasang. Dari `config.yaml` Hermes hanya bagian hooks yang dibaca | `python tools\uji_penjaga.py --claude-settings ~/.claude/settings.json --antigravity-hooks ~/.gemini/config/hooks.json --hermes-config D:/Hermes/config.yaml` (tambah `--hermes-doctor D:/Hermes/bin/hermes.exe` untuk ringkasan `hermes hooks doctor`) |
-| `laporan_harian.py` | Laporan harian terjadwal: lint vault, pindai cadangan dengan gitleaks tanpa push, salinan aturan, uji hidup penjaga, dan proses sisa, ditulis ke `Riwayat Perckapan\laporan-harian.json`. Dijalankan Task Scheduler ("AI Agent Laporan Harian", harian dan saat login, sekali sehari), dan hook awal sesi workspace menampilkan satu baris kalau ada temuan atau laporannya basi. Tidak pernah commit, push, atau menulis vault | `python tools\laporan_harian.py jalan --vault <vault> --words <daftar> --secrets-from <compose> --gitleaks <exe> --claude-settings <settings> --antigravity-hooks <hooks> --hermes-config <config>` (atau `baris`) |
-| `cek_jurnal.py` | Hook Stop Claude: kalau berkas proyek di `D:\CODE` berubah sesudah tulisan terakhir ke folder Log vault di sesi itu, agent ditahan sekali untuk menulis log (Aturan 4) atau menyebut kenapa tidak perlu. Tidak menahan saat `stop_hook_active` atau dua kali untuk perubahan yang sama, dan melewati proyek `.no-vault` | `python tools\cek_jurnal.py --hook --vault <vault> --projects-root D:/CODE` (dari hook Stop di `~/.claude/settings.json`) |
+| `putar_log.py` | Pindahkan entri bulan lalu dari `Wiki/log.md` dan `log_id.md` ke folder `Riwayat/` di vault. Dijalankan di langkah 1 Kompilasi | `python tools\putar_log.py --vault <vault>` (tulis) atau `--cek` (lapor) |
+| `cadangkan_vault.py` | Cadangkan vault ke repo git privatnya: pindai semua berkas teks (secret, kata terlarang, nomor identitas), lalu gitleaks sebagai gerbang kedua, dan commit serta push hanya kalau bersih. Dijalankan di langkah terakhir Kompilasi | `python tools\cadangkan_vault.py --vault <vault> --words Konfigurasi\penjaga_vault_terlarang.txt --secrets-from <berkas secret> --gitleaks <gitleaks.exe>` (atau `--cek`) |
+| `penjaga_repo.py` | Hook sebelum perintah shell: menolak clone repo pihak ketiga ke folder kerja dan salinan dari folder repo luar ke sana, lalu menunjuk tujuan yang benar. Terpasang di Claude, Hermes, dan Antigravity | Dipasang sebagai hook (`--format claude`, `hermes`, atau `antigravity`), bukan dijalankan manual |
+| `uji_penjaga.py` | Uji hidup penjaga yang terpasang: perintah hook `vault_guard.py`, `penjaga_repo.py`, dan `penjaga_desain.py` di Claude, Antigravity, dan Hermes dijalankan persis seperti di konfigurasinya, dengan payload wajib tolak dan kembarannya yang wajib lolos. Keluar 1 kalau ada penjaga yang mati atau salah pasang. Dari `config.yaml` Hermes hanya bagian hooks yang dibaca | `python tools\uji_penjaga.py --claude-settings ~/.claude/settings.json --antigravity-hooks ~/.gemini/config/hooks.json --hermes-config <HERMES_HOME>/config.yaml` (tambah `--hermes-doctor <HERMES_HOME>/bin/hermes.exe` untuk ringkasan `hermes hooks doctor`) |
+| `laporan_harian.py` | Laporan harian terjadwal: lint vault, pindai cadangan dengan gitleaks tanpa push, salinan aturan, uji hidup penjaga, dan proses sisa, ditulis ke `Riwayat Perckapan\laporan-harian.json`. Dijalankan Task Scheduler ("AI Agent Laporan Harian", harian dan saat login, sekali sehari), dan hook awal sesi workspace menampilkan satu baris kalau ada temuan atau laporannya basi. Tidak pernah commit, push, atau menulis vault | `python tools\laporan_harian.py jalan --vault <vault> --words <daftar> --secrets-from <berkas secret> --gitleaks <exe> --claude-settings <settings> --antigravity-hooks <hooks> --hermes-config <config>` (atau `baris`) |
+| `cek_jurnal.py` | Hook Stop Claude: kalau berkas proyek di folder kerja berubah sesudah tulisan terakhir ke folder Log vault di sesi itu, agent ditahan sekali untuk menulis log (Aturan 4) atau menyebut kenapa tidak perlu. Tidak menahan saat `stop_hook_active` atau dua kali untuk perubahan yang sama, dan melewati proyek `.no-vault` | `python tools\cek_jurnal.py --hook --vault <vault> --projects-root <folder kerja>` (dari hook Stop di `~/.claude/settings.json`) |
+| `cek_bersih.py` | Cek pembersih sebelum komit atau push repo workspace: gitleaks, pola `vault_guard.py` (nomor identitas, kata terlarang, secret), email selain alamat noreply dan contoh, path profil pengguna, dan istilah pribadi dari daftar lokal. Keluar 1 kalau ada temuan | `python tools\cek_bersih.py [--istilah Konfigurasi\istilah_pribadi.txt] [--gitleaks <gitleaks.exe>]` |
 | `medusa` | Pindai keamanan konfigurasi agent, hook, dan MCP | `tools\medusa-venv\Scripts\medusa.exe scan .` |
 | `oper_kerja.py` | Oper tugas kecil ke agent gratis di git worktree, kumpulkan bukti, terapkan sesudah diperiksa. Baca skill `oper-kerja` dulu | `python tools\oper_kerja.py jalan --repo <repo> --tugas <berkas> --cek "<uji>"`, lalu `cek <id>`, `terapkan <id>`, `buang <id>` |
 | `test_tools.py` | Pengujian unit untuk logika tools internal | `tools\rag-venv\Scripts\python.exe tools\test_tools.py` |
