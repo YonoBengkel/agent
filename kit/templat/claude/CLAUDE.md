@@ -3,8 +3,7 @@
 
 > Bagian ini cermin **Aturan 13** di `{{WORKSPACE}}\AGENTS.md`, yang menjadi sumber utamanya dan
 > ditulis netral-platform. Ubah aturannya di sana dulu, lalu salin ke sini. Ditulis `pasang.py`
-> dari kit agent pada {{TANGGAL}}, di antara penanda `agent-kit` supaya pemasangan ulang hanya
-> mengganti bagian ini.
+> dari kit agent, di antara penanda `agent-kit` supaya pemasangan ulang hanya mengganti bagian ini.
 
 Berlaku untuk setiap sesi Claude Code di komputer ini, di folder mana pun. Aturan proyek
 (`CLAUDE.md` atau `AGENTS.md` di folder proyek) tetap berlaku.
