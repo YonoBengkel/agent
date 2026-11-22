@@ -1590,9 +1590,9 @@ class Pasang(unittest.TestCase):  # logika pemasang kit agent (pasang.py, 2026-1
         self.assertFalse(self.p.di_dalam(os.path.join("C:" + os.sep, "x"), d("x")))   # beda drive
         self.assertEqual(self.p.kutip("C:/Python314/python.exe"), "C:/Python314/python.exe")
         self.assertEqual(self.p.kutip("C:/Program Files/Python/python.exe"), '"C:/Program Files/Python/python.exe"')
-        for p in ("C:/Users/O'Brien/python.exe", "D:/Py(3)/python.exe", "D:/a&b/python.exe", "D:/c#/python.exe"):
+        for p in ("D:/Alat/O'Brien/python.exe", "D:/Py(3)/python.exe", "D:/a&b/python.exe", "D:/c#/python.exe"):
             self.assertEqual(self.p.kutip(p), f'"{p}"')   # tanpa kutip, Git Bash atau shlex Hermes salah memecahnya
-        self.assertEqual(self.p.kutip("C:/Users/Andrés/python.exe"), "C:/Users/Andrés/python.exe")
+        self.assertEqual(self.p.kutip("D:/Alat/Andrés/python.exe"), "D:/Alat/Andrés/python.exe")
 
 if __name__ == "__main__":
     unittest.main()
