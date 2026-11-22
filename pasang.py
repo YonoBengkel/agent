@@ -439,7 +439,7 @@ def main():
             "penjaga_repo": f'"{win(py)}" "{win(WS)}\\tools\\penjaga_repo.py" --format antigravity --projects-root "{fk}" --repo-luar "{repo_luar}"{owner}',
             "vault_guard": f'"{win(py)}" "{win(WS)}\\tools\\vault_guard.py" --format antigravity --vault "{vault}" --words "{WS}\\Konfigurasi\\penjaga_vault_terlarang.txt" --secrets-from "{WS}\\.env"{protect_win}'}
         for n, c in bungkus.items():
-            w.tulis(ag_hooks / f"{n}.cmd", f"@echo off\r\nrem Ditulis pasang.py dari kit agent pada {tanggal}. Sumber: {WS}\\tools\r\n{c}\r\n", timpa=True)
+            w.tulis(ag_hooks / f"{n}.cmd", f"@echo off\r\nrem Ditulis pasang.py dari kit agent. Sumber: {WS}\\tools\r\n{c}\r\n", timpa=True)
             cadangan_files.append(ag_hooks / f"{n}.cmd")
         hp = lambda n: posix(ag_hooks / f"{n}.cmd")
         grup = {"konteks-vault": {"SessionStart": [{"type": "command", "command": hp("konteks_vault"), "timeout": 20}]},
@@ -458,7 +458,7 @@ def main():
         arg_repo = f'--format hermes --projects-root "{FKP}" --repo-luar "{RLP}"{owner}'
         arg_konteks = f'--format hermes --projects-root "{FKP}" --vault "{VP}" --skip "{nama_ws}" "{VP}/hot.md"'
         blok = "\n".join([
-            f"{BEGIN_YAML} (ditulis pasang.py dari kit agent pada {tanggal}. Jangan disunting, jalankan ulang pasang.py)",
+            f"{BEGIN_YAML} (ditulis pasang.py dari kit agent. Jangan disunting, jalankan ulang pasang.py)",
             "hooks:", "  pre_tool_call:",
             f'    - matcher: "{VAULT_HERMES}"',
             "      " + hcmd("vault_guard.py", arg_vault),
@@ -512,7 +512,7 @@ def main():
         terjemahan.append({"source": posix(WS / "AGENTS.md"), "section": "## Rule 13", "mirror": posix(home / ".claude" / "CLAUDE.md"),
                            "note": "cermin Indonesia Aturan 13 saja"})
     reg = {"about": "Registry aturan: satu sumber, banyak salinan, dipakai tools/sync_rules.py. Ditulis pasang.py. Path salinan di profil "
-                    f"pengguna di sini diizinkan {nama} untuk ditulis agent, khusus untuk sinkronisasi aturan ({tanggal}).",
+                    f"pengguna di sini diizinkan {nama} untuk ditulis agent, khusus untuk sinkronisasi aturan.",
            "dipasang_oleh": "pasang.py", "vault": VP, "folder_kerja": FKP,
            "syncs": [{"name": "Protokol folder kerja", "source": posix(fk / "AGENTS.md"),
                       "copies": [{"path": posix(pth), "platform": pf} for pth, _, pf in salinan]}],
