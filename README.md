@@ -35,14 +35,15 @@ akun milik pemilik repo tidak ikut.
 ## Yang kamu butuhkan
 
 - Windows 10 atau 11.
-- Python 3.10 atau lebih baru dari python.org. Kit ini diuji dengan 3.14. Hook memakai Python yang
-  menjalankan `pasang.py`, jadi jangan dicopot sesudah memasang.
+- Python 3.10 atau lebih baru dari python.org. Pemasangan penuh diuji dengan 3.14, tes unitnya juga
+  dengan 3.12. Hook memakai Python yang menjalankan `pasang.py`, jadi jangan dicopot sesudah memasang.
 - Git for Windows. Claude Code menjalankan hook lewat Git Bash.
 - Paling sedikit satu agent yang sudah terpasang dan sudah login dengan akunmu sendiri: Claude Code,
   Antigravity, Hermes Agent, atau Zed. `pasang.py` hanya memasang ke agent yang foldernya sudah ada.
 - Docker Desktop, hanya kalau mau memakai 9Router untuk Hermes.
 - Obsidian untuk membuka vault. Tidak wajib, karena vault-nya berkas Markdown biasa.
-- Internet sekali jalan untuk paket RAG dan modelnya, dengan ruang disk sekitar 1,5 GB.
+- Internet sekali jalan untuk paket RAG dan modelnya. Ruang disknya sekitar 1 GB (venv RAG sekitar
+  430 MB, model sekitar 490 MB), ditambah cache unduhan pip.
 
 ## Memasang
 
