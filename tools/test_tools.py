@@ -913,6 +913,21 @@ class RagTranskrip(unittest.TestCase):  # arsip transkrip diindeks tanpa bagian 
         self.assertIsNone(rentang_baris(f.name, "tidak ada"))
         os.unlink(f.name)
 
+class RagOnnx(unittest.TestCase):  # model ONNX memberi vektor yang sama dengan SentenceTransformer, Q16 di log vault 078 (2026-11-22)
+    def test_sama_dengan_sentence_transformer(self):
+        import rag_engine as r
+        if not os.path.isfile(r.ONNX_MODEL):
+            self.skipTest("model ONNX belum diekspor (rag_engine.py onnx)")
+        import numpy as np
+        from sentence_transformers import SentenceTransformer
+        teks = ["query: kapan laporan token mingguan pertama", "passage: The hook holds the first message after a long pause.",
+                "passage: " + "kalimat panjang untuk menguji pemotongan token. " * 200]   # lebih dari 512 token
+        onnx = r.OnnxE5(r.ONNX_MODEL)
+        a = onnx.encode(teks)
+        b = SentenceTransformer(r.MODEL).encode(teks, normalize_embeddings=True)
+        self.assertGreaterEqual(float((a * b).sum(1).min()), 0.9999)
+        self.assertTrue(np.allclose(onnx.encode(teks, batch_size=1), a, atol=1e-5))   # padding dalam batch tidak mengubah vektor
+
 class LintDrift(unittest.TestCase):  # istilah pensiun, tag dicek yang tua, dan log penjaga (riset 2026-11-13, M8 dan C10)
     def test_istilah_dan_drift(self):
         import vault_lint as vl
@@ -1310,6 +1325,7 @@ class PenahanJeda(unittest.TestCase):  # hook UserPromptSubmit Q2 di log vault 0
         self.assertIsNone(p.putuskan(pl, 200_000, True, st, jam(3)))                        # kiriman ulang lolos
         self.assertIsNone(p.putuskan(dict(pl, prompt="#lanjut ya"), 200_000, True, st, jam(5)))
         self.assertEqual(p.putuskan(dict(pl, prompt="#uji-tahan"), 200_000, False, st, jam(1))["decision"], "block")
+        self.assertIsNone(p.putuskan(dict(pl, prompt="> Ketik #uji-tahan halo\nOke"), 200_000, False, st, jam(1)))   # kutipan
         with open(tr, "a", encoding="utf-8") as f:
             f.write(json.dumps({"type": "system", "subtype": "compact_boundary", "timestamp": "2026-11-22T02:00:00Z"}) + "\n")
         self.assertIsNone(p.putuskan(pl, 200_000, False, st, jam(5)))                       # sudah diringkas

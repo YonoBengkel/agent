@@ -7,10 +7,11 @@ yang memenuhi syarat (log 079).
   python tools/penahan_jeda.py [--ambang 200000] [--tahan] [--state <berkas.json>]
 
 Bawaannya hanya memperingatkan lewat systemMessage dan additionalContext. Dengan --tahan, pesan pertama sesudah jeda
-ditahan sekali (decision block), lalu pesan berikutnya di jeda yang sama lolos. Mode tahan baru dipakai sesudah
-terbukti aplikasi desktop tidak menghapus pesan yang ditahan. Pesan berisi `#uji-tahan` selalu ditahan, untuk menguji
-perilaku itu di aplikasi. Pesan berisi `#lanjut` selalu lolos tanpa peringatan. Galat apa pun berarti lolos tanpa
-keluaran, supaya hook ini tidak pernah menghalangi kerja."""
+ditahan sekali (decision block), lalu pesan berikutnya di jeda yang sama lolos. Aplikasi desktop tidak menghapus pesan
+yang ditahan: teksnya tetap tampil di percakapan dengan tombol Edit prompt (diuji Ilham 2026-11-22). Pesan yang diawali
+`#uji-tahan` selalu ditahan untuk menguji perilaku itu, tetapi kutipan yang memuatnya di tengah tidak. Pesan berisi
+`#lanjut` selalu lolos tanpa peringatan. Galat apa pun berarti lolos tanpa keluaran, supaya hook ini tidak pernah
+menghalangi kerja."""
 import argparse
 import datetime as dt
 import json
@@ -79,7 +80,7 @@ def putuskan(payload, ambang, tahan, state_path, sekarang=None):
     prompt = payload.get("prompt") or ""
     if "#lanjut" in prompt:
         return None
-    if "#uji-tahan" in prompt:
+    if prompt.lstrip().startswith("#uji-tahan"):   # kutipan yang memuatnya di tengah pesan tidak ikut ditahan
         return {"decision": "block", "reason": "Uji penahan jeda: pesan ini sengaja ditahan untuk melihat apakah "
                 "aplikasi menyimpan teksnya. Kirim ulang tanpa #uji-tahan untuk lanjut."}
     path = payload.get("transcript_path")

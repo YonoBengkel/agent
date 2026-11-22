@@ -26,6 +26,9 @@ import chromadb
 # (hanya metadata), "vector" (diawalkan ke teks yang di-embed), "bm25", atau "both". Tetap "none" sampai mode
 # lain lulus uji tertutup, bukan hanya set dev (Pelajaran #14).
 MODEL = "intfloat/multilingual-e5-small"
+# Ekspor ONNX dari MODEL yang sama (Q16, log vault 079): vektornya sama, tetapi dimuat sekitar 2,7 detik, bukan 16 sampai
+# 24 detik, karena torch dan transformers tidak diimpor. Tanpa berkas ini, search memakai SentenceTransformer seperti dulu.
+ONNX_MODEL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "onnx", MODEL.replace("/", "--"), "model.onnx")
 QUERY_PREFIX, PASSAGE_PREFIX = "query: ", "passage: "   # wajib untuk keluarga e5
 COLLECTION = "vault"
 EXCLUDE = ["log.md", "log_id.md", "log 20??-??.md", "log_id 20??-??.md"]   # log wiki dan arsip bulanannya di Riwayat/ (2026-11-10)
@@ -198,9 +201,74 @@ def link_rank(fused, graph, seeds=5, norm=True):
             score[p] += sc / math.sqrt(len(graph[s]) * len(graph[p])) if norm else sc
     return sorted(score.items(), key=lambda x: -x[1])
 
+class OnnxE5:
+    """MODEL lewat ONNX Runtime dengan antarmuka encode() SentenceTransformer: rata-rata token yang tidak di-padding,
+    lalu dinormalkan. onnxruntime dan tokenizers sudah ikut terpasang bersama chromadb."""
+    def __init__(self, path):
+        import onnxruntime as ort
+        from tokenizers import Tokenizer
+        self.tok = Tokenizer.from_file(os.path.join(os.path.dirname(path), "tokenizer.json"))
+        self.tok.enable_truncation(512)   # max_seq_length MODEL
+        pad = self.tok.token_to_id("<pad>")
+        self.tok.enable_padding(**({"pad_id": pad, "pad_token": "<pad>"} if pad is not None else {}))
+        self.sesi = ort.InferenceSession(path, providers=["CPUExecutionProvider"])
+
+    def encode(self, texts, normalize_embeddings=True, batch_size=32):
+        import numpy as np
+        # Urut menurut panjang seperti SentenceTransformer, supaya satu batch tidak di-padding ke teks terpanjang di
+        # antara teks pendek. Tanpa ini embedding massal dua kali lebih lambat (log vault 079).
+        urut = sorted(range(len(texts)), key=lambda i: -len(texts[i]))
+        out = np.zeros((len(texts), self.sesi.get_outputs()[0].shape[-1]), dtype=np.float32)
+        for i in range(0, len(urut), batch_size):
+            idx = urut[i:i + batch_size]
+            enc = self.tok.encode_batch([texts[j] for j in idx])
+            ids = np.array([e.ids for e in enc], dtype=np.int64)
+            mask = np.array([e.attention_mask for e in enc], dtype=np.int64)
+            h = self.sesi.run(None, {"input_ids": ids, "attention_mask": mask})[0]
+            v = (h * mask[..., None]).sum(1) / np.maximum(mask.sum(1, keepdims=True), 1)
+            out[idx] = v / np.linalg.norm(v, axis=1, keepdims=True) if normalize_embeddings else v
+        return out
+
 def load_model():
+    """Model ONNX kalau hasil ekspornya ada, selain itu SentenceTransformer."""
+    if os.path.isfile(ONNX_MODEL):
+        try:
+            return OnnxE5(ONNX_MODEL)
+        except Exception as e:   # onnxruntime atau berkasnya rusak: jatuh ke cara lama, tetap jalan
+            print(f"[WARN] Model ONNX gagal dimuat, memakai SentenceTransformer: {e}")
     from sentence_transformers import SentenceTransformer
     return SentenceTransformer(MODEL)
+
+def ekspor_onnx():
+    """Tulis ONNX_MODEL dan tokenizer.json dari MODEL di cache lokal, sekali jalan. Butuh paket onnx, yang tidak
+    dipakai sesudahnya: pip install onnx==1.23.2 ml_dtypes==0.6.0, lalu boleh dicopot lagi."""
+    import importlib.util
+    if importlib.util.find_spec("onnx") is None:
+        sys.exit("[ERROR] Paket onnx belum terpasang. Pasang dulu: pip install onnx==1.23.2 ml_dtypes==0.6.0")
+    import torch
+    from transformers import AutoModel, AutoTokenizer
+    # Attention eager, bukan SDPA bawaan: ekspor SDPA membuat embedding massal 1,5 kali lebih lambat dari
+    # SentenceTransformer, ekspor eager sedikit lebih cepat darinya dengan vektor yang sama (log vault 079).
+    tok, enc = AutoTokenizer.from_pretrained(MODEL), AutoModel.from_pretrained(MODEL, attn_implementation="eager").eval()
+
+    class Keluaran(torch.nn.Module):   # transformers 5 tidak menerima attention_mask sebagai argumen posisional kedua
+        def __init__(self, m):
+            super().__init__()
+            self.m = m
+
+        def forward(self, input_ids, attention_mask):
+            return self.m(input_ids=input_ids, attention_mask=attention_mask).last_hidden_state
+
+    os.makedirs(os.path.dirname(ONNX_MODEL), exist_ok=True)
+    contoh = tok([QUERY_PREFIX + "contoh"], return_tensors="pt")
+    sumbu = {n: {0: "batch", 1: "token"} for n in ("input_ids", "attention_mask", "last_hidden_state")}
+    tmp = ONNX_MODEL + ".tmp"
+    torch.onnx.export(Keluaran(enc), (contoh["input_ids"], contoh["attention_mask"]), tmp,
+                      input_names=["input_ids", "attention_mask"], output_names=["last_hidden_state"],
+                      dynamic_axes=sumbu, opset_version=17, dynamo=False)
+    tok.save_pretrained(os.path.dirname(ONNX_MODEL))
+    os.replace(tmp, ONNX_MODEL)
+    print(f"[*] Model ONNX ditulis: {ONNX_MODEL} ({os.path.getsize(ONNX_MODEL) / 1e6:.0f} MB).")
 
 def load_manifest():
     try:
@@ -266,8 +334,8 @@ def sync(collection, root, changed, removed, current, model, manifest):
 def main():
     sys.stdout.reconfigure(encoding='utf-8')
     parser = argparse.ArgumentParser(description="AI Agent Local RAG Engine v6 — hybrid (e5 + BM25), overlap chunk, index inkremental, judul bagian per chunk")
-    parser.add_argument("action", choices=["index", "search", "status"],
-                        help="index: index folder (hanya file yang berubah); search: cari (index disegarkan dulu kalau ada file berubah); status: hitung file yang berubah sejak index terakhir")
+    parser.add_argument("action", choices=["index", "search", "status", "onnx"],
+                        help="index: index folder (hanya file yang berubah); search: cari (index disegarkan dulu kalau ada file berubah); status: hitung file yang berubah sejak index terakhir; onnx: ekspor model ke ONNX sekali supaya search cepat dimuat")
     parser.add_argument("target", nargs="?", help="Path folder (untuk index) atau kata kunci (untuk search)")
     parser.add_argument("--folder", type=str, default=None, help="Filter: hanya file di folder induk dengan nama ini")
     # 10 sejak 2026-11-13 (riset C11): di set dev Recall@10 0,81 lawan Recall@5 0,68, MRR tetap 0,65
@@ -277,6 +345,8 @@ def main():
     parser.add_argument("--root", default=VAULT, help='search: folder akar yang dicari, mis. "D:/KULIAH/MATA KULIAH/SEM 5" '
                                                       '(bawaan: vault); "all" untuk semua folder yang diindeks')
     args = parser.parse_args()
+    if args.action == "onnx":
+        return ekspor_onnx()
     if args.action != "status" and not args.target:
         parser.error(f"'{args.action}' butuh target (folder atau kata kunci)")
 
