@@ -107,7 +107,10 @@ class VaultGuard(unittest.TestCase):
                  ("PowerShell", "[math]::Round((Get-Item a.md).Length / 1MB, 2)"), ("PowerShell", "$n = 10; $n / 2"),
                  ("PowerShell", "Get-ChildItem | ForEach-Object { $_.Length / 1KB }"),
                  # description hanya label untuk pengguna, tidak dijalankan (salah tolak 2026-11-20)
-                 ("Bash", "ls", "D:/CODE", "Daftar isi D:/ dan C:\\"), ("PowerShell", "Get-Location", "D:/CODE", "Akar D: tidak dibaca")]
+                 ("Bash", "ls", "D:/CODE", "Daftar isi D:/ dan C:\\"), ("PowerShell", "Get-Location", "D:/CODE", "Akar D: tidak dibaca"),
+                 # \" di dalam kutip ganda Bash adalah escape (salah tolak 2026-11-22), dan nilai opsi biasa tetap lolos
+                 ("Bash", 'python -c "k = \\"(1)\\"; print(k)"'), ("Bash", "git log --format=%H --since=2026-11-01"),
+                 ("PowerShell", "Get-ChildItem -Path:. -Filter:*.md"), ("Bash", "git --git-dir=/tmp/x status")]
         tolak = [("Bash", f'cat "{pv}/a.md"'), ("PowerShell", f'Get-Content "{P}\\a.md"'), ("Bash", 'ls "/d/Pribadi Uji"'),
                  ("Bash", "ls D:/"), ("PowerShell", f'Get-ChildItem "{P}" -Recurse'), ("Bash", f"python -c \"open(r'{pv}/a.md').read()\""),
                  ("PowerShell", "Get-ChildItem / -Recurse"), ("Bash", 'for d in C D; do ls "$d:"; done'),   # di PowerShell "/" akar drive
@@ -128,7 +131,13 @@ class VaultGuard(unittest.TestCase):
                  ("PowerShell", "Get-ChildItem / 2 -Recurse"), ("PowerShell", "$n / 2; Get-ChildItem / -Recurse"),
                  ("PowerShell", "Get-ChildItem '/' -Recurse"), ("PowerShell", "ls `\n$y / 2"),
                  # akar drive di command tetap ditolak, apa pun isi description-nya
-                 ("Bash", "ls D:/", "D:/CODE", "Daftar isi folder proyek")]
+                 ("Bash", "ls D:/", "D:/CODE", "Daftar isi folder proyek"),
+                 # nilai path yang menempel di opsi tetap dinilai (celah 2026-11-22), juga sesudah operator bagi yang sah
+                 ("PowerShell", "Get-ChildItem -Path:/ -Recurse"), ("PowerShell", "$n / 2; Get-ChildItem -Path:/ -Recurse"),
+                 ("PowerShell", "Get-ChildItem -LiteralPath:D:\\ -Recurse"), ("Bash", "git --work-tree=../.. status"),
+                 ("Bash", "tar -C/d/ -cf x.tar ."),
+                 # escape \" tidak menyembunyikan path sesudah string, dan akar drive di dalam string tetap ditolak
+                 ("Bash", 'echo "a\\"b" && ls ../..'), ("Bash", 'python -c "import os; print(os.listdir(\\"D:/\\"))"')]
         self.assertEqual([putus(*k) for k in lolos], ["allow"] * len(lolos))
         self.assertEqual([putus(*k) for k in tolak], ["deny"] * len(tolak))   # D:/ ikut: induk vault pribadi, sama dengan Hermes
 

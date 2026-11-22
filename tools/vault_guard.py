@@ -58,6 +58,10 @@ GIT_BASH = re.compile(r"^/([a-zA-Z])(?:/|$)")  # /d/... menjadi D:/...
 
 # Satu potongan perintah shell: pemisah, redirect, atau kata (boleh berisi kutipan dan spasi yang di-escape)
 SHELL_PIECE = re.compile(r"""&&|\|\||[;|\n()`]|\d*>>?\|?|(?:"[^"]*"|'[^']*'|\\.|&(?!&)|[^\s;|&><()`"'\\])+""")
+# Bash: \" di dalam kutip ganda adalah escape dan tidak menutup string (salah tolak 2026-11-22). Di PowerShell \ bukan escape
+SHELL_PIECE_BASH = re.compile(r"""&&|\|\||[;|\n()`]|\d*>>?\|?|(?:"(?:[^"\\]|\\.)*"|'[^']*'|\\.|&(?!&)|[^\s;|&><()`"'\\])+""")
+# Nilai path yang menempel di opsi: -Path:/ dan --output=D:/x, atau -C/d/ dan -ID:/x (celah 2026-11-22)
+OPSI_NILAI = re.compile(r"^--?[\w-]+[:=](.+)$|^-[a-zA-Z]((?:[a-zA-Z]:|[\\/]|\.\.?(?:[\\/]|$)).*)$")
 SHELL_SEPARATORS = {"&&", "||", ";", "|", "\n", "(", ")", "`"}
 SHELL_PREFIX = {"sudo", "env", "command", "builtin", "exec", "time", "nohup", "xargs", "busybox", "call", "do", "then",
                 "else", "if", "while", "until", "!", "{", "}", "{}", "&"}
@@ -220,10 +224,10 @@ def touches(target, base, folders):
     path = os.path.join(base, path)
     return [f for f in folders if inside(path, f) or inside(f, path)]
 
-def shell_segments(command):
+def shell_segments(command, pola=SHELL_PIECE):
     """Pecah perintah menjadi (kata, target redirect) per bagian."""
     segments, words, outs, redirect = [], [], [], False
-    for piece in SHELL_PIECE.findall(command):
+    for piece in pola.findall(command):
         if piece in SHELL_SEPARATORS:
             segments.append((words, outs))
             words, outs = [], []
@@ -345,7 +349,8 @@ def opens(text, folder):
     """Teks menyebut folder atau isinya (D:/x, D:\\x, x%20y, /d/x, /mnt/d/x), atau menyebut induknya sebagai path utuh,
     karena membaca induk ikut membaca folder itu. D:/x/y yang y-nya bukan folder itu tidak kena. Kutip dilepas dua cara:
     "D:/"x menyatu, sedangkan r"D:/x" dan "D:/x"/y dipisah spasi supaya awalan dan akhir path tetap terbaca."""
-    raw = unquote(re.sub(r"\\+", "/", text.replace("\\ ", " "))).lower()
+    # \" adalah kutip yang di-escape, bukan garis miring, jadi D:/ sebelum \" tetap terbaca akar drive (2026-11-22)
+    raw = unquote(re.sub(r"\\+", "/", text.replace("\\ ", " ").replace('\\"', '"'))).lower()
     variants = (re.sub(r"""["']""", "", raw), re.sub(r"""["']""", " ", raw))
     path = os.path.abspath(folder).replace("\\", "/").lower().rstrip("/")
     def forms(p):  # akar drive tidak punya bentuk /d, karena bentrok dengan switch Windows
@@ -398,16 +403,20 @@ def opened(hook, folders):
         command = str(ti.get("command") or "")
         if tool == "Bash":   # isi heredoc untuk perintah bukan shell tidak dinilai per kata (2026-11-20)
             command = tanpa_heredoc(command)
-        pieces = [w for words, outs in shell_segments(command) for w in words + outs]
+        pieces = [w for words, outs in shell_segments(command, SHELL_PIECE_BASH if tool == "Bash" else SHELL_PIECE)
+                  for w in words + outs]
         paths = [clean(w) for w in pieces if not w.startswith("-") and not WINDOWS_SWITCH.fullmatch(w)]
+        if tool == "PowerShell" and "/" in paths and touches("/", base, folders) and bagi_ps(command):
+            paths = [p for p in paths if p != "/"]   # / di sini operator bagi, bukan akar drive (salah tolak 2026-11-21)
+        # nilai yang menempel di opsi tetap path (celah -Path:/ 2026-11-22). Ditambahkan sesudah saringan operator bagi, supaya
+        # / di -Path:/ tidak ikut terbuang, dan sebelum saringan Bash, supaya --git-dir=/tmp/x tetap dibaca folder Git
+        paths += [m.group(1) or m.group(2) for m in (OPSI_NILAI.match(clean(w)) for w in pieces if w.startswith("-")) if m]
         if tool == "Bash":   # Git Bash: path berawalan / selain bentuk drive (/d/...) dan UNC (//...) menunjuk folder Git atau
             # mount seperti /tmp, tidak pernah ke D:. Ini mencakup /, operator / Python (2026-11-19), dan pola regex awk atau
             # sed yang diawali / dan memuat wildcard (2026-11-20). Path utuh, termasuk /mnt/d/..., tetap dicek lewat opens()
             paths = [p for p in paths if not (p.startswith("/") and not p.startswith("//") and not GIT_BASH.match(p))]
             # garis miring terbalik sebelum * ? [ ] di Bash adalah escape, bukan akar drive: grep "\[OK\]" (2026-11-21)
             paths = [re.sub(r"\\([*?\[\]])", r"\1", p) for p in paths]
-        elif tool == "PowerShell" and "/" in paths and touches("/", base, folders) and bagi_ps(command):
-            paths = [p for p in paths if p != "/"]   # / di sini operator bagi, bukan akar drive (salah tolak 2026-11-21)
     elif tool == "execute_code":
         paths = []
     else:
