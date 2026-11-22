@@ -81,6 +81,24 @@ def read_text(path):
         raise OSError(f"markitdown gagal: {err[-1] if err else out.returncode}")
     return out.stdout.decode('utf-8', 'replace')
 
+def rentang_baris(path, chunk):
+    """(baris awal, baris akhir) potongan di berkas sumbernya, supaya pembaca cukup membuka bagian itu (Q9b, log vault
+    078). None untuk dokumen yang dikonversi, berkas yang tak terbaca, atau potongan yang tidak ditemukan."""
+    if os.path.splitext(path)[1].lower() in CONVERT_EXTS or not chunk.strip():
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+    except (OSError, UnicodeDecodeError):
+        return None
+    i = text.find(chunk)
+    if i < 0:
+        i = text.find(chunk.strip().splitlines()[0])
+    if i < 0:
+        return None
+    awal = text.count("\n", 0, i) + 1
+    return awal, awal + chunk.rstrip("\n").count("\n")
+
 def resolve_root(manifest, arg):
     """Folder akar di manifest yang sama dengan arg (besar-kecil huruf dan garis miring diabaikan)."""
     p = os.path.normcase(os.path.abspath(arg))
@@ -339,7 +357,8 @@ def main():
 
         print(f"[*] Pencarian: '{args.target}' (cakupan: {'semua folder' if args.root == 'all' else scope[0]})"
               + (f" (folder: {args.folder})" if args.folder else ""))
-        print("[*] Ini daftar halaman untuk dibuka, bukan jawaban. Jarak cosine: kecil = mirip.\n")
+        print("[*] Ini daftar halaman untuk dibuka, bukan jawaban. Jarak cosine: kecil = mirip. Buka rentang barisnya dulu\n"
+              "    (baca dengan offset dan limit), baru seluruh berkas kalau perlu.\n")
         for n, (f, _) in enumerate(fused, 1):
             if f not in dist:   # masuk lewat BM25 atau [[link]]: ambil jarak chunk terbaiknya
                 r = collection.query(query_embeddings=[q], n_results=1, where={"source": f})
@@ -349,7 +368,9 @@ def main():
             vtxt = f"\n   terangkat lewat [[link]] dari: {', '.join(via)}" if f not in direct and via else ""
             stxt = f"\n   bagian: {section[f]}" if section.get(f) else ""
             snippet = " ".join(best_chunk[f].split())[:280]
-            print(f"{n}. {rel(f)}{stxt}\n   jarak {dist[f]:.3f}{flag}{vtxt}\n   {snippet}…\n")
+            rb = rentang_baris(f, best_chunk[f])
+            btxt = f" (baris {rb[0]}-{rb[1]})" if rb else ""
+            print(f"{n}. {rel(f)}{btxt}{stxt}\n   jarak {dist[f]:.3f}{flag}{vtxt}\n   {snippet}…\n")
 
 if __name__ == "__main__":
     main()

@@ -59,6 +59,10 @@ def cek_semua(a):
                                        [l.strip() for l in o.splitlines() if "GAGAL" in l] or [o.strip()[-160:]])
     k, o = jalan(py + ["tools/cek_proses_sisa.py", "--sejak", "24h"])
     hasil["proses sisa"] = nilai(k, o, [] if "Tidak ada proses" in o else [l.strip() for l in o.splitlines() if l.strip()])
+    # Laporan anggaran token mingguan (log vault 078, Q20): ditulis hanya kalau jatuh tempo; isinya tampil lewat
+    # ukur_token.baris di hook awal sesi workspace, jadi di sini hanya gagal atau tidaknya yang dinilai.
+    k, o = jalan(py + ["tools/ukur_token.py", "laporan", "--simpan", os.path.dirname(LAPORAN), "--jatuh-tempo"], batas=900)
+    hasil["anggaran token"] = nilai(k, o, [] if k == 0 else [l.strip() for l in o.splitlines() if l.strip()][-3:])
     return hasil
 
 def tulis(hasil, path=LAPORAN):

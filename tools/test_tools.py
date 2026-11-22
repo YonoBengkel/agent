@@ -467,6 +467,25 @@ class SessionContext(unittest.TestCase):
         self.assertIsNone(s.project_name(root, root))
         self.assertIsNone(s.project_name(root, os.path.join("D:" + os.sep, "KULIAH")))
 
+    def test_bagian_sekarang(self):  # percontohan Q8: hanya `## Sekarang` yang dimuat untuk Claude Code (2026-11-22)
+        import tempfile
+        import session_context as s
+        with tempfile.TemporaryDirectory() as t:
+            vault, root = os.path.join(t, "Vault"), os.path.join(t, "CODE")
+            for d in (os.path.join(vault, "Wiki", "projects"), os.path.join(root, "Toko"), os.path.join(root, "Lama")):
+                os.makedirs(d)
+            with open(os.path.join(vault, "Wiki", "projects", "Toko.md"), "w", encoding="utf-8") as f:
+                f.write("# Toko\n\n> Halaman toko.\n\n## Sekarang\n\n- status terbaru\n\n## Keputusan\n\nisi lama\n")
+            with open(os.path.join(vault, "Wiki", "projects", "Lama.md"), "w", encoding="utf-8") as f:
+                f.write("# Lama\n\n## Keputusan\n\nisi lama\n")
+            ctx = s.project_context(root, vault, "Toko", sekarang=True)
+            self.assertIn("status terbaru", ctx)
+            self.assertIn("Halaman toko", ctx)
+            self.assertNotIn("isi lama", ctx)
+            self.assertIn("tidak dimuat: Keputusan", ctx)
+            self.assertIn("isi lama", s.project_context(root, vault, "Toko"))                 # Antigravity dan Hermes: halaman penuh
+            self.assertIn("isi lama", s.project_context(root, vault, "Lama", sekarang=True))  # tanpa `## Sekarang`: perilaku lama
+
     def test_design_line(self):  # baris kontrak desain ditaruh paling atas, jadi tidak ikut terpotong (2026-11-08)
         import json, subprocess, tempfile
         import session_context as s
@@ -881,6 +900,19 @@ class RagTranskrip(unittest.TestCase):  # arsip transkrip diindeks tanpa bagian 
         self.assertEqual(tanpa_bagian_alat(t), "# Sesi\n\n### [USER]\n\nhalo\n\n### [ASSISTANT]\n\njawab\n\n")
         self.assertEqual(tanpa_bagian_alat("# Halaman\n\n## Bagian\n\nisi\n"), "# Halaman\n\n## Bagian\n\nisi\n")   # vault tidak berubah
 
+    def test_rentang_baris(self):  # hasil pencarian menyebut baris potongannya, Q9b di log vault 078 (2026-11-22)
+        import tempfile
+        from rag_engine import chunk_sections, rentang_baris
+        teks = "# Judul\n\npembuka\n\n## Bagian\n\n" + "".join(f"baris {i}\n" for i in range(300))
+        with tempfile.NamedTemporaryFile("w", suffix=".md", encoding="utf-8", delete=False) as f:
+            f.write(teks)
+        potongan = [c for _, c in chunk_sections(teks, overlap=100) if c.strip()]
+        self.assertEqual(rentang_baris(f.name, potongan[0]), (1, 3))   # baris kosong di ujung potongan tidak dihitung
+        awal, akhir = rentang_baris(f.name, potongan[2])
+        self.assertTrue(teks.splitlines()[awal - 1].endswith(potongan[2].splitlines()[0]))
+        self.assertIsNone(rentang_baris(f.name, "tidak ada"))
+        os.unlink(f.name)
+
 class LintDrift(unittest.TestCase):  # istilah pensiun, tag dicek yang tua, dan log penjaga (riset 2026-11-13, M8 dan C10)
     def test_istilah_dan_drift(self):
         import vault_lint as vl
@@ -1194,6 +1226,109 @@ class LaporanHarian(unittest.TestCase):  # laporan harian terjadwal, rancangan 1
             with open(p, "w", encoding="utf-8") as f:
                 json.dump(data, f)
             self.assertEqual(l.baris(p, hari), "")
+
+class UkurToken(unittest.TestCase):  # alat ukur anggaran token mingguan, Q11 dan Q20 di log vault 078 (2026-11-22)
+    def test_jeda_dan_bobot(self):
+        import datetime as dt
+        import ukur_token as u
+        t0 = dt.datetime(2026, 11, 20, tzinfo=dt.timezone.utc)
+        akhir = t0 + dt.timedelta(days=1)
+        def c(menit, cc, cr, jam=True):
+            return dict(t=t0 + dt.timedelta(minutes=menit), model="claude-opus-5-5", it=0, cc=cc, cr=cr, ot=100,
+                        w1=cc if jam else 0, w5=0 if jam else cc)
+        calls = [c(0, 1000, 0), c(10, 1000, 300_000), c(100, 301_000, 0), c(105, 1000, 301_000)]
+        self.assertEqual([round(k["jeda_jam"], 1) for k in u.kembali_setelah_jeda(calls, t0, akhir)], [1.5])
+        lima = [c(0, 1000, 0, False), c(10, 1000, 300_000, False), c(16, 301_000, 0, False)]   # TTL 5 menit: 6 menit sudah dingin
+        self.assertEqual([k["prompt"] for k in u.kembali_setelah_jeda(lima, t0, akhir)], [301_000])
+        self.assertAlmostEqual(u.biaya(c(0, 1_000_000, 1_000_000)), 8 + 0.2 + 0.002)
+
+    def test_baris(self):
+        import datetime as dt
+        import json
+        import tempfile
+        import ukur_token as u
+        d = tempfile.mkdtemp()
+        self.assertEqual(u.baris(d, dt.date(2026, 11, 25)), "")   # sebelum laporan pertama
+        self.assertIn("belum ada", u.baris(d, dt.date(2026, 12, 2)))
+        r = {"beban_awal": {"median": 90_000}, "kembali_jeda": {"n": 3}, "porsi_opus_lengkap": 0.5, "menganggur": {"n": 4}}
+        with open(os.path.join(d, "laporan-token-2026-11-29.json"), "w", encoding="utf-8") as f:
+            json.dump(r, f)
+        self.assertIn("beban awal 90 ribu", u.baris(d, dt.date(2026, 11, 30)))
+        self.assertIn("terakhir 2026-11-29", u.baris(d, dt.date(2026, 12, 9)))
+
+    def test_beban_awal(self):   # pesan sintetis dan salinan fork tidak dihitung sebagai beban awal
+        import datetime as dt
+        import json
+        import tempfile
+        import ukur_token as u
+        d = tempfile.mkdtemp()
+        def pesan(mid, model, n):
+            return json.dumps({"type": "assistant", "timestamp": "2026-11-20T01:00:00Z", "message": {
+                "id": mid, "model": model, "usage": {"input_tokens": 0, "cache_creation_input_tokens": n}}}) + "\n"
+        induk, fork = os.path.join(d, "induk.jsonl"), os.path.join(d, "fork.jsonl")
+        with open(induk, "w", encoding="utf-8") as f:
+            f.write(pesan("s", "<synthetic>", 0) + pesan("a", "claude-opus-5-5", 100_000) + pesan("b", "claude-opus-5-5", 120_000))
+        with open(fork, "w", encoding="utf-8") as f:
+            f.write(pesan("a", "claude-opus-5-5", 100_000) + pesan("c", "claude-opus-5-5", 150_000))
+        sejak, bersama = dt.datetime(2026, 11, 19, tzinfo=dt.timezone.utc), ({}, set())
+        self.assertEqual(u.pindai(induk, True, sejak, *bersama)[2][1], 100_000)
+        self.assertIsNone(u.pindai(fork, True, sejak, *bersama)[2])
+
+    def test_daftar_skill(self):   # daftar awal sesi terbaru menang atas kiriman ulang sesudah ringkas di sesi lama (Q15)
+        import json
+        import tempfile
+        import ukur_token as u
+        d = tempfile.mkdtemp()
+        def daftar(jam, isi):
+            return json.dumps({"type": "attachment", "timestamp": f"2026-11-22T{jam}:00:00Z", "attachment": {
+                "type": "skill_listing", "content": isi, "isInitial": True}}) + "\n"
+        lama, baru = os.path.join(d, "lama.jsonl"), os.path.join(d, "baru.jsonl")
+        with open(lama, "w", encoding="utf-8") as f:
+            f.write(daftar("10", "- a: x\n- iklan: y") + daftar("12", "- a: x\n- iklan: y"))
+        with open(baru, "w", encoding="utf-8") as f:
+            f.write(daftar("11", "- a: x\n- pdf"))
+        self.assertEqual(u.daftar_skill([lama, baru]), ({"a": True, "pdf": False}, baru, len("- a: x\n- pdf")))
+
+class PenahanJeda(unittest.TestCase):  # hook UserPromptSubmit Q2 di log vault 078 (2026-11-22)
+    def test_putuskan(self):
+        import datetime as dt
+        import json
+        import tempfile
+        import penahan_jeda as p
+        d = tempfile.mkdtemp()
+        tr, st = os.path.join(d, "sesi.jsonl"), os.path.join(d, "state.json")
+        usage = {"input_tokens": 1, "cache_read_input_tokens": 299_000, "cache_creation_input_tokens": 1000,
+                 "output_tokens": 10, "cache_creation": {"ephemeral_1h_input_tokens": 1000}}
+        with open(tr, "w", encoding="utf-8") as f:
+            f.write(json.dumps({"type": "assistant", "timestamp": "2026-11-22T01:00:00Z", "message": {"usage": usage}}) + "\n")
+        pl = {"transcript_path": tr, "prompt": "halo", "session_id": "s1"}
+        jam = lambda h: dt.datetime(2026, 11, 22, h, tzinfo=dt.timezone.utc)
+        self.assertIsNone(p.putuskan(pl, 200_000, False, st, jam(1)))                       # cache masih hangat
+        self.assertIn("systemMessage", p.putuskan(pl, 200_000, False, st, jam(3)))          # jeda 2 jam: peringatan
+        self.assertIsNone(p.putuskan(pl, 400_000, False, st, jam(3)))                       # di bawah ambang
+        self.assertEqual(p.putuskan(pl, 200_000, True, st, jam(3))["decision"], "block")    # tahan sekali
+        self.assertIsNone(p.putuskan(pl, 200_000, True, st, jam(3)))                        # kiriman ulang lolos
+        self.assertIsNone(p.putuskan(dict(pl, prompt="#lanjut ya"), 200_000, True, st, jam(5)))
+        self.assertEqual(p.putuskan(dict(pl, prompt="#uji-tahan"), 200_000, False, st, jam(1))["decision"], "block")
+        with open(tr, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"type": "system", "subtype": "compact_boundary", "timestamp": "2026-11-22T02:00:00Z"}) + "\n")
+        self.assertIsNone(p.putuskan(pl, 200_000, False, st, jam(5)))                       # sudah diringkas
+
+class PenjagaSubagent(unittest.TestCase):  # aturan inti 3: subagent tanpa model eksplisit ditolak (2026-11-22)
+    def test_putuskan(self):
+        import tempfile
+        import penjaga_subagent as p
+        d = tempfile.mkdtemp()
+        with open(os.path.join(d, "pencari.md"), "w", encoding="utf-8") as f:
+            f.write("---\nname: pencari\ntools: Read, Grep, Glob\nmodel: haiku\n---\n")
+        def keputusan(masukan, alat="Agent"):
+            return ((p.putuskan({"tool_name": alat, "tool_input": masukan}, d) or {}).get("hookSpecificOutput") or {}).get("permissionDecision")
+        self.assertEqual(keputusan({"prompt": "x"}), "deny")
+        self.assertEqual(keputusan({"prompt": "x", "subagent_type": "Explore"}), "deny")
+        self.assertIsNone(keputusan({"prompt": "x", "model": "sonnet"}))
+        self.assertIsNone(keputusan({"prompt": "x", "subagent_type": "pencari"}))
+        self.assertIsNone(keputusan({"prompt": "x", "subagent_type": "fork"}))
+        self.assertIsNone(keputusan({"command": "ls"}, "Bash"))
 
 class PutarLog(unittest.TestCase):  # log wiki diputar per bulan (2026-11-10)
     def test_putar_dan_ulang(self):

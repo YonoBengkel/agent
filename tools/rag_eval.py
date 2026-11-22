@@ -20,12 +20,15 @@ def load_set(path):
     with open(path, encoding="utf-8") as f:
         return [json.loads(line) for line in f if line.strip()]
 
-def load_chunks(vault, chunk_size, exclude, overlap=0):
-    """Chunk vault memakai fungsi rag_engine yang sama dengan produksi: (file, jalur judul bagian, teks)."""
+def load_chunks(vault, chunk_size, exclude, overlap=0, log_older=None):
+    """Chunk vault memakai fungsi rag_engine yang sama dengan produksi: (file, jalur judul bagian, teks). Dengan
+    log_older, log sesi di Log/ yang tidak diubah lebih dari sekian hari tidak ikut (uji A/B Q9, log vault 078)."""
     chunks = []
     for f in rag_engine.get_files(vault):
         rel = os.path.relpath(f, vault).replace("\\", "/")
         if any(fnmatch.fnmatch(os.path.basename(rel), pat) for pat in exclude):
+            continue
+        if log_older is not None and rel.startswith("Log/") and time.time() - os.path.getmtime(f) > log_older * 86400:
             continue
         try:
             with open(f, encoding="utf-8") as fh:
@@ -127,6 +130,7 @@ def main():
     p.add_argument("--chunk-size", type=int, default=1000)
     p.add_argument("--overlap", type=int, default=0, help="Karakter yang bertumpang antar potongan berurutan dalam satu section")
     p.add_argument("--exclude", action="append", default=[], help="Pola nama file yang tidak diindeks, mis. log.md (boleh diulang)")
+    p.add_argument("--log-older", type=float, help="Jangan indeks log sesi di Log/ yang tidak diubah lebih dari sekian hari (uji A/B)")
     p.add_argument("--backend", choices=["vector", "bm25", "hybrid", "all"], default="all")
     p.add_argument("--vector-weight", type=float, default=2.0, help="Bobot vektor terhadap BM25 (=1) di RRF; 2 terbaik di set dev 2026-10-13")
     p.add_argument("--link-weight", type=float, action="append", default=[], help="Tambah backend hybrid+link dengan bobot daftar tetangga [[link]] ini di RRF (boleh diulang)")
@@ -145,7 +149,7 @@ def main():
         p.error("--overlap harus >= 0 dan lebih kecil dari --chunk-size")
 
     t0 = time.time()
-    sectioned = load_chunks(a.vault, a.chunk_size, a.exclude, a.overlap)
+    sectioned = load_chunks(a.vault, a.chunk_size, a.exclude, a.overlap, a.log_older)
     chunks = [(f, c) for f, _, c in sectioned]
     backends = {}
     if a.backend in ("bm25", "hybrid", "all"):
@@ -167,7 +171,7 @@ def main():
     if a.backend != "all":
         backends = {n: b for n, b in backends.items() if n == a.backend or n.startswith(a.backend + "+")}
 
-    excl = f", tanpa {', '.join(a.exclude)}" if a.exclude else ""
+    excl = (f", tanpa {', '.join(a.exclude)}" if a.exclude else "") + (f", tanpa log sesi > {a.log_older:g} hari" if a.log_older is not None else "")
     link = f", link seeds {a.link_seeds}{' tanpa normalisasi' if a.no_link_norm else ''}" if a.link_weight else ""
     print(f"# Evaluasi RAG — model `{a.model}`, chunk {a.chunk_size}, overlap {a.overlap}, judul bagian: {a.section}{excl}{link}\n\n"
           f"{len({f for f, _ in chunks})} file, {len(chunks)} chunk, siap dalam {time.time() - t0:.1f} detik. "
@@ -180,7 +184,7 @@ def main():
             per = evaluate(fn, rows, a.k)
             results[f"{os.path.basename(s)}::{name}"] = {"metrics": report(name, per, a.k, is_dist), "per": per}
     os.makedirs(a.out, exist_ok=True)
-    tag = re.sub(r"[^A-Za-z0-9]+", "-", f"{a.model}-c{a.chunk_size}-o{a.overlap}-s{a.section}-{'-'.join(a.exclude) or 'all'}")
+    tag = re.sub(r"[^A-Za-z0-9]+", "-", f"{a.model}-c{a.chunk_size}-o{a.overlap}-s{a.section}-{'-'.join(a.exclude) or 'all'}{f'-logmaks{a.log_older:g}h' if a.log_older is not None else ''}")
     out = os.path.join(a.out, f"{time.strftime('%Y%m%d-%H%M%S')}-{tag}.json")
     with open(out, "w", encoding="utf-8") as f:
         json.dump({"config": vars(a), "chunks": len(chunks), "results": results}, f, ensure_ascii=False, indent=1)

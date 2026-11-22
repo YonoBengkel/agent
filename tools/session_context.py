@@ -7,6 +7,7 @@ import datetime
 import subprocess
 
 LOW_PRIORITY = ("## Catatan kompilasi", "## Rujukan")   # bagian halaman proyek yang dilepas dulu kalau terlalu panjang
+SEKARANG = re.compile(r"(?ms)^## Sekarang[^\n]*\n.*?(?=^## |\Z)")   # hot proyek di halaman proyek (percontohan Q8, log vault 078)
 KATA_IZIN = re.compile(r"(?i)\bpakai konteks\b")   # kata izin pengguna untuk mengirim isi vault ke model Hermes (2026-11-11)
 CONTRACT_ROW = re.compile(r"^\|\s*\[\[([^\]|]+)(?:\|[^\]]*)?\]\]\s*\|(.*)\|$")   # | [[Proyek]] | berkas | arah |
 
@@ -53,15 +54,26 @@ def report_line():
     except Exception:
         return ""
 
+def token_line():
+    """Satu baris ringkasan laporan anggaran token minggu ini, atau peringatan kalau laporannya basi (log vault 078, Q20)."""
+    try:
+        import ukur_token
+        line = ukur_token.baris(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Riwayat Perckapan"))
+    except Exception:
+        return ""
+    return f"\n\n{line}" if line else ""
+
 def hot_context(hot, root=None):
-    """Mode AI Agent: muat hot.md (Aturan 1), plus pengingat Kompilasi, peringatan canary basi, dan laporan harian."""
+    """Mode AI Agent: muat hot.md (Aturan 1), plus pengingat Kompilasi, peringatan canary basi, laporan harian, dan
+    ringkasan anggaran token mingguan."""
     try:
         with open(hot, encoding="utf-8-sig") as f:
             text = f.read()
     except OSError as e:
         text = f"[hot.md tidak bisa dibaca: {e}. Baca manual sesuai Aturan 1.]"
     return ("Isi hot.md, dimuat otomatis di awal sesi (Aturan 1). Ini cache; detail ada di index.md dan KONTEKS_PROYEK.md.\n\n"
-            + text + compile_reminder(os.path.dirname(os.path.abspath(hot))) + canary_warning(root) + report_line())
+            + text + compile_reminder(os.path.dirname(os.path.abspath(hot))) + canary_warning(root) + report_line()
+            + token_line())
 
 def project_name(root, cwd):
     """Folder proyek tingkat pertama di bawah root untuk folder kerja ini, atau None kalau di luar root."""
@@ -114,8 +126,20 @@ def commit_warning(vault, folder, project, page, text):
     return (f"[Peringatan komit] Repo ini punya {n} komit sesudah catatan vault terakhirnya ({day}), yang terbaru: "
             f"{rows[0][:120]}. Lihat `git log` sejak tanggal itu, lalu catat status atau keputusan baru di halaman proyek (Pelajaran #25).")
 
-def project_context(root, vault, project):
-    """Mode proyek (D:\\CODE\\AGENTS.md): muat halaman proyek dari vault untuk folder kerja sesi ini."""
+def bagian_sekarang(text, page):
+    """Pembuka halaman proyek plus bagian `## Sekarang` saja, dengan daftar bagian lain yang dibaca hanya bila tugas
+    membutuhkannya. None kalau halaman tidak punya bagian itu (percontohan Q8 di log vault 078 dan 079, 2026-11-22)."""
+    m = SEKARANG.search(text)
+    if not m:
+        return None
+    pembuka = re.split(r"(?m)^## ", text, maxsplit=1)[0].rstrip()
+    lain = [h.strip() for h in re.findall(r"(?m)^## (.+)$", text) if not h.startswith("Sekarang")]
+    sisa = f"\n\n[Bagian lain halaman ini tidak dimuat: {', '.join(lain)}. Baca dari {page} hanya yang dibutuhkan tugas.]" if lain else ""
+    return f"{pembuka}\n\n{m.group(0).rstrip()}{sisa}"
+
+def project_context(root, vault, project, sekarang=False):
+    """Mode proyek (D:\\CODE\\AGENTS.md): muat halaman proyek dari vault untuk folder kerja sesi ini. Dengan
+    `sekarang`, halaman yang punya bagian `## Sekarang` hanya dimuat bagian itu (saat percontohan hanya Claude Code)."""
     folder = os.path.join(os.path.abspath(root), project)
     if os.path.exists(os.path.join(folder, ".no-vault")):
         return f"Proyek `{project}` memakai `.no-vault`: jangan membaca atau menulis catatan vault untuk proyek ini (D:\\CODE\\AGENTS.md)."
@@ -132,6 +156,7 @@ def project_context(root, vault, project):
                 f"penting pertama, dan tulis log sesi ke {os.path.join(vault, 'Log', project)}.{top}")
     warning = commit_warning(vault, folder, project, page, text)
     top += f"\n\n{warning}" if warning else ""
+    text = (bagian_sekarang(text, page) if sekarang else None) or text
     budget = 9200 - len(top)   # batas konteks hook 10.000 karakter, termasuk kepala, baris desain, dan peringatan komit
     if len(text) > budget:
         # Bagian yang paling jarang dibutuhkan di awal sesi dilepas dulu, baru sisanya dipotong (2026-10-16)
@@ -211,7 +236,8 @@ def main():
             if project and project in args.skip:
                 context = hot_context(args.hot, args.projects_root) if args.hot else None   # mis. AI Agent: halamannya hot.md (Aturan 1)
             else:
-                context = project_context(args.projects_root, args.vault, project) if project else None
+                # Percontohan Q8: hanya Claude Code yang memuat `## Sekarang`; Antigravity dan Hermes menyusul lewat gelombang Q10
+                context = project_context(args.projects_root, args.vault, project, args.format == "claude") if project else None
         else:
             context = hot_context(args.hot)
     except Exception as e:
