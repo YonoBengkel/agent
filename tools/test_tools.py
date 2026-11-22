@@ -961,6 +961,23 @@ class LintDrift(unittest.TestCase):  # istilah pensiun, tag dicek yang tua, dan 
             self.assertEqual(c[("vault_guard", "deny", "vault pribadi")], 1)
             self.assertEqual(c[("?", "baris rusak", "")], 1)
 
+    def test_rag_staleness_lewati_no_vault(self):  # folder .no-vault dilewati seperti di rag_engine (uji kit 2026-11-23)
+        import hashlib, json, vault_lint as vl
+        with _tempfile.TemporaryDirectory() as t:
+            vault = os.path.join(t, "vault")
+            os.makedirs(os.path.join(vault, "Cadangan Aturan"))
+            for rel, isi in (("a.md", "a"), ("Cadangan Aturan/.no-vault", ""), ("Cadangan Aturan/b.md", "b"), ("c.md", "c")):
+                with open(os.path.join(vault, *rel.split("/")), "w", encoding="utf-8") as f:
+                    f.write(isi)
+            manifest = os.path.join(t, "manifest.json")
+            with open(manifest, "w", encoding="utf-8") as f:
+                json.dump({"roots": {vault: {"a.md": hashlib.sha1(b"a").hexdigest(), "lama.md": "x"}}, "exts": [".md"], "exclude": []}, f)
+            lama, vl.MANIFEST = vl.MANIFEST, manifest
+            try:
+                self.assertEqual(vl.rag_staleness(vault), (["c.md"], ["lama.md"]))
+            finally:
+                vl.MANIFEST = lama
+
 class LogNumbering(unittest.TestCase):
     def test_missing_and_duplicate(self):
         import vault_lint

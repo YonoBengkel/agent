@@ -50,7 +50,10 @@ def rag_staleness(vault):
     if root is None:
         return None
     known, current = m["roots"][root], {}
-    for dp, _, fn in os.walk(root):
+    for dp, dn, fn in os.walk(root):
+        if ".no-vault" in fn:   # dilewati rag_engine.get_files beserta isinya, jadi bukan berkas yang belum diindeks
+            dn[:] = []
+            continue
         for f in fn:
             if os.path.splitext(f)[1].lower() in m["exts"] and not any(fnmatch.fnmatch(f, x) for x in m["exclude"]):
                 p = os.path.join(dp, f)
