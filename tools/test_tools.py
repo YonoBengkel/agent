@@ -82,9 +82,9 @@ class VaultGuard(unittest.TestCase):
     def test_pagar_shell_claude(self):  # di shell Claude hanya vault pribadi yang ditolak, tanpa tanya (riset M7, keputusan 2026-11-14)
         P = os.path.join("D:" + os.sep, "Pribadi Uji")
         v, pv = self.V.replace("\\", "/"), P.replace("\\", "/")
-        def putus(tool, command, cwd="D:/CODE"):
+        def putus(tool, command, cwd="D:/CODE", deskripsi="uji"):
             kode, out, err = self.jalan_guard({"hook_event_name": "PreToolUse", "tool_name": tool, "cwd": cwd,
-                                               "tool_input": {"command": command, "description": "uji"}}, "--protect", P)
+                                               "tool_input": {"command": command, "description": deskripsi}}, "--protect", P)
             self.assertEqual(out.strip(), "")   # tidak pernah JSON tanya
             return "deny" if kode == 2 else "allow"
         lolos = [("Bash", f'echo x > "{v}/a.md"'), ("Bash", f'cd "{v}" && echo x > a.md'), ("Bash", f'git -C "{v}" checkout -- .'),
@@ -102,7 +102,12 @@ class VaultGuard(unittest.TestCase):
                  ("Bash", "ls /usr/bin /tmp"),
                  # \[ di Bash adalah escape, dan d: sesudah kata kunci Python atau kurung adalah kode (salah tolak 2026-11-21)
                  ("Bash", 'grep -vE "\\[SAMA\\]|\\[OK\\]" a.txt'), ("Bash", 'python -c "d = [1]\nfor x in d:\n    print(x)"'),
-                 ("Bash", "python - <<'EOF'\nd = {}\nif d:\n    print(d[1:], {d: 1})\nEOF")]
+                 ("Bash", "python - <<'EOF'\nd = {}\nif d:\n    print(d[1:], {d: 1})\nEOF"),
+                 # operator bagi PowerShell, dikenali pengurai PowerShell sendiri (salah tolak 2026-11-21)
+                 ("PowerShell", "[math]::Round((Get-Item a.md).Length / 1MB, 2)"), ("PowerShell", "$n = 10; $n / 2"),
+                 ("PowerShell", "Get-ChildItem | ForEach-Object { $_.Length / 1KB }"),
+                 # description hanya label untuk pengguna, tidak dijalankan (salah tolak 2026-11-20)
+                 ("Bash", "ls", "D:/CODE", "Daftar isi D:/ dan C:\\"), ("PowerShell", "Get-Location", "D:/CODE", "Akar D: tidak dibaca")]
         tolak = [("Bash", f'cat "{pv}/a.md"'), ("PowerShell", f'Get-Content "{P}\\a.md"'), ("Bash", 'ls "/d/Pribadi Uji"'),
                  ("Bash", "ls D:/"), ("PowerShell", f'Get-ChildItem "{P}" -Recurse'), ("Bash", f"python -c \"open(r'{pv}/a.md').read()\""),
                  ("PowerShell", "Get-ChildItem / -Recurse"), ("Bash", 'for d in C D; do ls "$d:"; done'),   # di PowerShell "/" akar drive
@@ -117,7 +122,13 @@ class VaultGuard(unittest.TestCase):
                  ("Bash", "ls /d/"), ("Bash", 'ls "/mnt/d/Pribadi Uji"'), ("Bash", 'cat "/../d/Pribadi Uji/a.md"'),
                  # akar drive tetap ditolak sesudah pengecualian kode Python (2026-11-21)
                  ("Bash", "ls D:"), ("Bash", "for f in D:/*; do echo $f; done"),
-                 ("Bash", "python -c \"import os; print(os.listdir('D:/'))\"")]
+                 ("Bash", "python -c \"import os; print(os.listdir('D:/'))\""),
+                 # di mode argumen perintah PowerShell / tetap akar drive, juga kalau diapit angka atau variabel
+                 ("PowerShell", "rg 5 / 2"), ("PowerShell", "$r = rg 5 / 2"), ("PowerShell", "rg ($x) $y / 2"),
+                 ("PowerShell", "Get-ChildItem / 2 -Recurse"), ("PowerShell", "$n / 2; Get-ChildItem / -Recurse"),
+                 ("PowerShell", "Get-ChildItem '/' -Recurse"), ("PowerShell", "ls `\n$y / 2"),
+                 # akar drive di command tetap ditolak, apa pun isi description-nya
+                 ("Bash", "ls D:/", "D:/CODE", "Daftar isi folder proyek")]
         self.assertEqual([putus(*k) for k in lolos], ["allow"] * len(lolos))
         self.assertEqual([putus(*k) for k in tolak], ["deny"] * len(tolak))   # D:/ ikut: induk vault pribadi, sama dengan Hermes
 

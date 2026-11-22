@@ -27,6 +27,7 @@ import fnmatch
 import pathlib
 import sqlite3
 import argparse
+import subprocess
 from urllib.parse import unquote
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -364,6 +365,24 @@ def opens(text, folder):
             return True
     return False
 
+# Pengurai PowerShell sendiri: offset token Divide. Perintah dibaca dari stdin sebagai UTF-8, jadi kode halaman konsol tidak ikut
+BAGI_PS = ("$m = New-Object IO.MemoryStream; [Console]::OpenStandardInput().CopyTo($m); $t = $e = $null; "
+           "[void][Management.Automation.Language.Parser]::ParseInput([Text.Encoding]::UTF8.GetString($m.ToArray()), [ref]$t, [ref]$e); "
+           "$t | Where-Object Kind -eq Divide | ForEach-Object { $_.Extent.StartOffset }")
+
+def bagi_ps(command):
+    """Semua kata / di perintah PowerShell ini operator bagi menurut pengurai PowerShell sendiri (salah tolak 2026-11-21 di
+    Barcelona). Di mode argumen perintah / tetap akar drive (Get-ChildItem /, rg x /), dan bedanya hanya terbaca pengurai itu.
+    Satu / yang bukan token Divide, atau pengurai yang gagal atau lewat 5 detik, berarti / tetap dinilai sebagai path."""
+    posisi = [len(command[:m.start()].encode("utf-16-le")) // 2 for m in SHELL_PIECE.finditer(command) if clean(m.group()) == "/"]
+    try:
+        r = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", BAGI_PS],
+                           input=command.encode("utf-8"), capture_output=True, timeout=5)
+        bagi = {int(x) for x in r.stdout.split()} if r.returncode == 0 else set()
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return False
+    return bool(posisi) and all(p in bagi for p in posisi)
+
 def opened(hook, folders):
     """Folder --protect yang dibaca, ditulis, atau dicakup panggilan ini. Isi tulisan tidak ikut dinilai, jadi catatan yang
     sekadar menyebut path folder itu tetap boleh ditulis ke tempat lain."""
@@ -371,6 +390,8 @@ def opened(hook, folders):
         return []
     ti = hook.get("tool_input") or {}
     tool, base = hook.get("tool_name"), str(hook.get("cwd") or os.getcwd())
+    if tool in SHELL_LAIN and isinstance(ti, dict):   # description Bash dan PowerShell Claude hanya label untuk pengguna dan
+        ti = {k: v for k, v in ti.items() if k != "description"}   # tidak dijalankan (salah tolak 2026-11-20 di Data Slayer)
     texts = [] if tool in WRITE_TOOLS else leaves(ti)
     found = [f for f in folders if any(opens(t, f) for t in texts)]
     if tool in ("terminal", *SHELL_LAIN):
@@ -385,6 +406,8 @@ def opened(hook, folders):
             paths = [p for p in paths if not (p.startswith("/") and not p.startswith("//") and not GIT_BASH.match(p))]
             # garis miring terbalik sebelum * ? [ ] di Bash adalah escape, bukan akar drive: grep "\[OK\]" (2026-11-21)
             paths = [re.sub(r"\\([*?\[\]])", r"\1", p) for p in paths]
+        elif tool == "PowerShell" and "/" in paths and touches("/", base, folders) and bagi_ps(command):
+            paths = [p for p in paths if p != "/"]   # / di sini operator bagi, bukan akar drive (salah tolak 2026-11-21)
     elif tool == "execute_code":
         paths = []
     else:
