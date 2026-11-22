@@ -116,8 +116,9 @@ def gabung_claude(settings, hooks_kit, deny_kit, penanda):
             del hooks[event]
     for event, grup in hooks_kit.items():
         hooks.setdefault(event, []).extend(copy.deepcopy(grup))
-    deny = s.setdefault("permissions", {}).setdefault("deny", [])
-    deny.extend(r for r in deny_kit if r not in deny)
+    if deny_kit:
+        deny = s.setdefault("permissions", {}).setdefault("deny", [])
+        deny.extend(r for r in deny_kit if r not in deny)
     return s
 
 
@@ -243,7 +244,8 @@ def unduh_model(tujuan, dari=None):
 
 
 def main():
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    # Per baris, supaya urutannya tetap benar di antara keluaran subproses (pip, sync_rules) saat dialihkan ke berkas log
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
     p = argparse.ArgumentParser(description="Pasang kit agent: aturan, hook penjaga, kerangka vault, skill, dan RAG (Windows).")
     p.add_argument("--vault", required=True, help="Folder vault memori. Dibuat dari kerangka kalau belum ada atau kosong")
     p.add_argument("--nama", required=True, help="Nama panggilanmu, dipakai di aturan (misalnya 'Budi')")
