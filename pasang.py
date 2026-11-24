@@ -3,9 +3,13 @@
 Jalankan dari folder hasil clone. Folder itu sekaligus menjadi workspace agent, dan induknya menjadi folder kerja
 (tempat proyek-proyekmu). Jadi clone repo ini langsung ke dalam folder kerja, misalnya D:\\Proyek\\Agent.
 
+  siapkan.cmd   (klik dua kali: mencari Python, lalu menjalankan pasang.py --tanya)
   python pasang.py --vault "D:/Obsidian/Memori Agent" --nama Budi [--github budi]
          [--platform claude,antigravity,hermes,zed] [--lindungi "<folder>"]... [--repo-luar "<folder>"]
          [--hermes-home "<folder>"] [--tanpa-rag] [--model-dari <folder>] [--uji-kering] [--paksa]
+
+--tanya menanyakan opsi yang wajib, menjalankan uji kering, lalu menunggu persetujuan sebelum menulis apa pun. Opsi pemasangan
+terakhir dicatat di Konfigurasi/rule_sync.json dan dipakai lagi oleh --tanya, jadi siapkan.cmd juga dipakai untuk memperbarui.
 
 Berkas yang sudah ada tidak ditimpa: aturan, isi vault, .env, 9Router, dan skill dibiarkan, kecuali --paksa untuk
 aturan (dengan cadangan .bak). Konfigurasi agent (settings.json Claude, hooks.json Antigravity, config.yaml Hermes)
@@ -13,6 +17,7 @@ digabung: hook milik sendiri tetap ada, hook kit lama diganti, dan berkas asliny
 config.yaml Hermes yang sudah punya bagian hooks sendiri tidak disentuh: potongannya ditulis ke Konfigurasi/.
 Hanya library bawaan Python. Logikanya diuji di tools/test_tools.py."""
 import argparse
+import collections
 import copy
 import datetime
 import hashlib
@@ -43,7 +48,8 @@ MODEL_DIR = WS / "tools" / "models" / "onnx" / MODEL_REPO.replace("/", "--")
 TULIS_AG = "write_file|edit_file|write_to_file|replace_file_content|multi_replace_file_content"
 VAULT_AG = TULIS_AG + "|read_file|view_file|list_dir|find_by_name|grep_search|run_command"
 VAULT_HERMES = "write_file|patch|terminal|execute_code|read_file|search_files|vision_analyze|video_analyze|browser_navigate|web_extract"
-LARANGAN = set('"%$`\n\r')   # tidak bisa dikutip aman sekaligus di Git Bash, .cmd, JSON, dan YAML
+LARANGAN = set('"%$`<>|?*\n\r')   # tidak sah di path Windows, atau tidak bisa dikutip aman di Git Bash, .cmd, JSON, dan YAML
+OPSI_SIMPAN = ("vault", "nama", "github", "platform", "lindungi", "repo_luar", "hermes_home", "tanpa_rag")
 SKILL_KIT = ("grill-me", "grilling", "obsidian-workflow", "oper-kerja", "webapp-audit", "webapp-testing")
 
 posix = lambda p: str(p).replace("\\", "/")
@@ -170,9 +176,10 @@ def yaml_kutip(s):
 class Penulis:
     """Semua tulisan lewat sini, supaya --uji-kering cukup mencetak rencananya."""
     def __init__(self, kering):
-        self.kering, self.ditulis = kering, []
+        self.kering, self.diubah, self.hitung = kering, [], collections.Counter()
 
     def lapor(self, status, path, ket=""):
+        self.hitung[status] += 1
         print(f"  [{status}] {path}{'  ' + ket if ket else ''}")
 
     def cadangkan(self, path):
@@ -191,11 +198,11 @@ class Penulis:
                 self.lapor("SAMA", path)
                 return False
             ket = f"cadangan {self.cadangkan(path).name}" + (f", {ket}" if ket else "")
+            self.diubah.append(path)
         self.lapor("DITULIS", path, ket)
         if not self.kering:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(teks, encoding="utf-8", newline="\n")
-        self.ditulis.append(path)
         return True
 
     def salin_folder(self, sumber, tujuan, nilai=None):
@@ -270,16 +277,158 @@ def unduh_model(tujuan, dari=None):
         print(f"  [DITULIS] {dst} (sha256 cocok)")
 
 
-def main():
-    # Per baris, supaya urutannya tetap benar di antara keluaran subproses (pip, sync_rules) saat dialihkan ke berkas log
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
+def salah_vault(vault, fk):
+    """Alasan folder vault ditolak, atau None."""
+    if any(c in LARANGAN for c in str(vault)):
+        return f"Path vault memuat karakter yang tidak didukung (kutip ganda, %, $, backtick, atau < > | ? *): {vault}"
+    if vault.parent == vault:
+        return "Vault tidak boleh akar drive. Pilih sebuah folder, misalnya D:\\Obsidian\\Memori Agent."
+    if not pathlib.Path(vault.anchor).exists():
+        return f"Drive {vault.anchor} tidak ada."
+    if vault.exists() and not vault.is_dir():
+        return f"{vault} sudah ada dan bukan folder."
+    if di_dalam(vault, fk) or di_dalam(fk, vault):
+        return f"Vault dan folder kerja ({fk}) harus terpisah, tidak boleh saling memuat."
+    return None
+
+
+def salah_nama(nama):
+    return "Nama tidak boleh kosong atau memuat kutip dan kurung kurawal." if not nama or any(c in nama for c in '"{}\n\r') else None
+
+
+def salah_github(akun):
+    return "Isi nama akun GitHub saja, tanpa URL." if akun and not re.fullmatch(r"[A-Za-z0-9-]{1,39}", akun) else None
+
+
+def daftar_lindungi(home, tambahan):
+    """~/.ssh selalu dilindungi, --lindungi hanya menambah."""
+    return list(dict.fromkeys(pathlib.Path(x).expanduser().resolve() for x in (home / ".ssh", *(tambahan or []))))
+
+
+def peringatan_folder(fk, home):
+    """Alasan folder kerja kurang cocok. Tidak menghentikan pemasangan, hanya ditanyakan lagi."""
+    awas = []
+    if di_dalam(home, fk):
+        awas.append("folder ini memuat folder profilmu, jadi aturan dan hook berlaku untuk semua isinya")
+    if fk.name.lower() in ("downloads", "desktop", "unduhan"):
+        awas.append("folder ini biasanya berisi berkas sementara, padahal hook mati kalau folder clone dipindah atau dihapus")
+    if any(b.lower().startswith(("onedrive", "dropbox", "google drive")) for b in fk.parts):
+        awas.append("folder ini disinkronkan ke cloud, padahal RAG menambah sekitar 1 GB dan ribuan berkas kecil")
+    return awas
+
+
+def opsi_lama(reg):
+    """Opsi pemasangan terakhir dari registry, supaya pemasangan ulang lewat --tanya tidak bertanya dari awal dan tidak
+    diam-diam melepas opsi seperti --lindungi."""
+    o = reg.get("opsi") if isinstance(reg, dict) and reg.get("dipasang_oleh") == "pasang.py" else None
+    return {k: v for k, v in o.items() if k in OPSI_SIMPAN and v} if isinstance(o, dict) else {}
+
+
+def ke_argv(opsi):
+    """Opsi sebagai argumen pasang.py. Bentuknya --opsi=nilai, supaya nilai yang diawali - tidak dibaca sebagai opsi."""
+    argv = []
+    for k, v in opsi.items():
+        nama = "--" + k.replace("_", "-")
+        if v is True:
+            argv.append(nama)
+        elif v:
+            argv += [f"{nama}={x}" for x in (v if isinstance(v, list) else [v])]
+    return argv
+
+
+def ya(teks, bawaan, masukan=input):
+    while True:
+        j = masukan(f"{teks} [{'Y/t' if bawaan else 'y/T'}] ").strip().lower()
+        if not j or j[0] in "yitn":   # ya, iya, yes, tidak, no
+            return j[0] in "yi" if j else bawaan
+
+
+def isian(teks, salah, bawaan="", masukan=input):
+    while True:
+        j = masukan(f"{teks}{f' [{bawaan}]' if bawaan else ''}: ").strip().strip('"').strip() or bawaan   # "Copy as path" membawa kutip
+        alasan = salah(j)
+        if not alasan:
+            return j
+        print(f"  {alasan}")
+
+
+def tanya(cli, lama, fk, home, masukan=input):
+    """Lengkapi opsi dengan bertanya (siapkan.cmd). `cli` opsi dari baris perintah, `lama` opsi pemasangan terakhir di clone ini.
+    Hasilnya dict opsi, atau None kalau pengguna berhenti."""
+    print("Penyiapan kit agent. Tekan Enter untuk memakai pilihan di dalam kurung siku, atau Ctrl+C untuk berhenti.\n")
+    print(f"Folder kerja: {fk}\n  Ini induk folder clone. Semua proyek di dalamnya akan memakai aturan dan hook kit.")
+    awas = peringatan_folder(fk, home)
+    for x in awas:
+        print(f"  PERHATIAN: {x}.")
+    if awas and not lama and not ya("Tetap memasang di sini?", False, masukan):
+        print("Pindahkan folder clone ini ke folder kerja yang tetap, misalnya menjadi D:\\Proyek\\Agent, lalu jalankan siapkan.cmd dari sana.")
+        return None
+    o = {**lama, **cli}
+    if lama:
+        print("\nOpsi pemasangan terakhir di clone ini" + (", ditambah opsi dari baris perintah:" if cli else ":"))
+        for k, v in o.items():
+            print(f"  {k:12}: {', '.join(v) if isinstance(v, list) else 'ya' if v is True else v}")
+        if ya("Pakai opsi ini?", True, masukan):
+            return o
+    print()
+    while "vault" not in cli:
+        o["vault"] = isian("Folder vault memori, dibuat kalau belum ada",
+                           lambda x: salah_vault(pathlib.Path(x).resolve(), fk) if pathlib.Path(x).is_absolute()
+                           else "Tulis path lengkapnya, misalnya D:\\Obsidian\\Memori Agent.",
+                           lama.get("vault") or str(fk.parent / "Obsidian" / "Memori Agent"), masukan)
+        v = pathlib.Path(o["vault"])
+        asing = v.is_dir() and any(x.name != ".obsidian" for x in v.iterdir()) and not (v / "hot.md").exists()
+        if not asing or ya("  Folder ini sudah berisi dan bukan vault kit (tidak ada hot.md), jadi kerangkanya tidak ditulis. Tetap pakai?", False, masukan):
+            break
+    if "nama" not in cli:
+        o["nama"] = isian("Nama panggilanmu, dipakai di aturan", salah_nama, lama.get("nama", ""), masukan)
+    if "github" not in cli:
+        o["github"] = isian("Akun GitHub-mu, kosongkan kalau tidak punya", salah_github, masukan=masukan)
+    if "tanpa_rag" not in cli:
+        o["tanpa_rag"] = not ya("Pasang pencarian vault (RAG)? Butuh sekitar 1 GB ruang disk dan mengunduh model 490 MB.",
+                                not lama.get("tanpa_rag"), masukan)
+    return o
+
+
+def pasang_bertanya(a, fk, home):
+    """--tanya: pertanyaan, uji kering, persetujuan, lalu pemasangan dengan opsi yang sama."""
+    sys.path.insert(0, str(WS / "tools"))
+    from uji_penjaga import git_bash
+    cli = {k: v for k, v in vars(a).items() if v and k not in ("tanya", "uji_kering")}
+    try:
+        if (home / ".claude").is_dir() and not git_bash():
+            print("Git for Windows tidak ditemukan di PATH, padahal Claude Code menjalankan hook lewat Git Bash.")
+            if shutil.which("winget") and ya("Pasang Git for Windows sekarang lewat winget?", False):
+                subprocess.run(["winget", "install", "--id", "Git.Git", "--exact", "--source", "winget"])
+            print("Sesudah Git terpasang, tutup jendela ini lalu jalankan siapkan.cmd lagi. Unduhan manualnya di "
+                  "https://git-scm.com/download/win. Kalau sebenarnya sudah terpasang, tambahkan folder Git\\cmd ke PATH.")
+            return 1
+        opsi = tanya(cli, opsi_lama(baca_json(WS / "Konfigurasi" / "rule_sync.json")), fk, home)
+        if opsi is None:
+            return 1
+        print("\nRencananya, belum ada yang ditulis:\n")
+        main([*ke_argv(opsi), "--uji-kering"])
+        if a.uji_kering:
+            return 0
+        print("\nTutup dulu semua sesi agent yang sedang berjalan.")
+        if not ya("Lanjut memasang sesuai rencana di atas?", False):
+            print("Dibatalkan. Tidak ada yang ditulis.")
+            return 1
+    except (EOFError, KeyboardInterrupt):
+        print("\nDibatalkan. Tidak ada yang ditulis.")
+        return 1
+    print()
+    return main(ke_argv(opsi))
+
+
+def pengurai():
     p = argparse.ArgumentParser(description="Pasang kit agent: aturan, hook penjaga, kerangka vault, skill, dan RAG (Windows).")
-    p.add_argument("--vault", required=True, help="Folder vault memori. Dibuat dari kerangka kalau belum ada atau kosong")
-    p.add_argument("--nama", required=True, help="Nama panggilanmu, dipakai di aturan (misalnya 'Budi')")
+    p.add_argument("--vault", help="Folder vault memori (wajib). Dibuat dari kerangka kalau belum ada atau kosong")
+    p.add_argument("--nama", help="Nama panggilanmu (wajib), dipakai di aturan (misalnya 'Budi')")
     p.add_argument("--github", help="Nama akun GitHub-mu: repo milik akun ini boleh di-clone ke folder kerja")
     p.add_argument("--folder-kerja", help="Folder proyek-proyekmu. Harus induk folder repo ini (bawaannya memang begitu)")
-    p.add_argument("--platform", default=",".join(PLATFORM), help="Agent yang dipasang, dipisah koma (bawaan: semua)")
-    p.add_argument("--lindungi", action="append", help="Folder yang sama sekali tidak boleh dibuka agent (boleh diulang, bawaan ~/.ssh)")
+    p.add_argument("--platform", help=f"Agent yang dipasang, dipisah koma (bawaan: {','.join(PLATFORM)})")
+    p.add_argument("--lindungi", action="append", help="Folder lain yang sama sekali tidak boleh dibuka agent (boleh diulang). ~/.ssh selalu dilindungi")
     p.add_argument("--repo-luar", help="Folder untuk repo pihak ketiga (bawaan: 'Repo Luar' di sebelah folder kerja)")
     p.add_argument("--hermes-home", help="Folder data Hermes (bawaan: HERMES_HOME atau ~/.hermes)")
     p.add_argument("--home", help="Folder profil pengguna pengganti, untuk uji")
@@ -287,7 +436,15 @@ def main():
     p.add_argument("--model-dari", help="Folder berisi model.onnx dan tokenizer.json yang sudah diunduh, alih-alih mengunduh")
     p.add_argument("--uji-kering", action="store_true", help="Cetak rencana tanpa menulis apa pun")
     p.add_argument("--paksa", action="store_true", help="Timpa berkas aturan yang sudah ada (dicadangkan dulu)")
-    a = p.parse_args()
+    p.add_argument("--tanya", action="store_true", help="Tanyakan opsi yang wajib, tampilkan rencananya, lalu minta persetujuan (siapkan.cmd)")
+    return p
+
+
+def main(argv=None):
+    # Per baris, supaya urutannya tetap benar di antara keluaran subproses (pip, sync_rules) saat dialihkan ke berkas log
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
+    p = pengurai()
+    a = p.parse_args(argv)
 
     if os.name != "nt":
         sys.exit("Kit ini baru untuk Windows.")
@@ -302,27 +459,28 @@ def main():
         sys.exit(f"Folder kerja harus induk folder repo ini ({fk}). Clone repo ini ke dalam {a.folder_kerja}, lalu jalankan dari sana.")
     if fk.parent == fk:
         sys.exit("Repo ini ada langsung di akar drive. Clone ke dalam sebuah folder kerja, misalnya D:\\Proyek\\Agent.")
-    vault = pathlib.Path(a.vault).resolve()
-    if vault.parent == vault:
-        sys.exit("Vault tidak boleh akar drive. Pilih sebuah folder, misalnya D:\\Obsidian\\Memori Agent.")
     py = pathlib.Path(sys.base_prefix) / "python.exe"   # Python dasar, bukan venv: hook harus tetap jalan walau venv dihapus
     py = py if py.exists() else pathlib.Path(sys.executable)
+    if "windowsapps" in str(py).lower():
+        sys.exit("Python ini dari Microsoft Store. Path-nya berganti setiap kali Store memperbaruinya, padahal hook menyimpan path itu. "
+                 "Pasang Python dari https://www.python.org/downloads/, lalu jalankan lagi.")
+    if a.tanya:
+        return pasang_bertanya(a, fk, home)
+    if not (a.vault and a.nama):
+        p.error("--vault dan --nama wajib diisi. Jalankan siapkan.cmd kalau mau ditanya satu per satu.")
+    vault = pathlib.Path(a.vault).resolve()
     repo_luar = pathlib.Path(a.repo_luar).resolve() if a.repo_luar else fk.parent / "Repo Luar"
-    lindungi = [pathlib.Path(x).expanduser().resolve() for x in (a.lindungi or [str(home / ".ssh")])]
-    platform = [x.strip() for x in a.platform.split(",") if x.strip()]
+    lindungi = daftar_lindungi(home, a.lindungi)
+    platform = [x.strip() for x in (a.platform or ",".join(PLATFORM)).split(",") if x.strip()]
     if bad := [x for x in platform if x not in PLATFORM]:
         sys.exit(f"Platform tidak dikenal: {', '.join(bad)}. Pilihan: {', '.join(PLATFORM)}")
-    if a.github and not re.fullmatch(r"[A-Za-z0-9-]{1,39}", a.github):
-        sys.exit("--github harus nama akun GitHub saja, tanpa URL.")
     nama = a.nama.strip()
-    if not nama or any(c in nama for c in '"{}\n\r'):
-        sys.exit("--nama tidak boleh kosong atau memuat kutip dan kurung kurawal.")
-    for label, path in [("workspace", WS), ("vault", vault), ("repo luar", repo_luar), ("profil", home), ("Hermes", hermes_home),
+    if salah := salah_vault(vault, fk) or salah_nama(nama) or salah_github(a.github):
+        sys.exit(salah)
+    for label, path in [("workspace", WS), ("repo luar", repo_luar), ("profil", home), ("Hermes", hermes_home),
                         ("Python", py), *[("folder dilindungi", x) for x in lindungi]]:
         if any(c in LARANGAN for c in str(path)):
-            sys.exit(f"Path {label} memuat karakter yang tidak didukung (kutip ganda, %, $, atau backtick): {path}")
-    if di_dalam(vault, fk) or di_dalam(fk, vault):
-        sys.exit("Vault dan folder kerja harus terpisah, tidak boleh saling memuat.")
+            sys.exit(f"Path {label} memuat karakter yang tidak didukung (kutip ganda, %, $, backtick, atau < > | ? *): {path}")
     if di_dalam(repo_luar, fk):
         sys.exit("Folder repo luar tidak boleh di dalam folder kerja. Pilih dengan --repo-luar.")
     for x in lindungi:
@@ -380,11 +538,17 @@ def main():
              "HERMES_HOME_POSIX": posix(hermes_home), "UJI_PENJAGA": uji_teks, "DAFTAR_PASANG": "\n".join(daftar)}
 
     print(f"Workspace   : {WS}\nFolder kerja: {fk}\nVault       : {vault}\nRepo luar   : {repo_luar}\n"
-          f"Dilindungi  : {', '.join(map(str, lindungi))}\nPlatform    : {', '.join(platform) or '-'}"
-          + (f"  (dilewati, belum terpasang: {', '.join(lewat)})" if lewat else ""))
+          f"Dilindungi  : {', '.join(map(str, lindungi))}\nPlatform    : {', '.join(platform) or '-'}")
+    catatan = []   # diulang di ringkasan uji kering, supaya tidak hilang tergulung
+    if lewat:
+        catatan.append(f"Belum terpasang, jadi dilewati: {', '.join(NAMA_PLATFORM[x] for x in lewat)}.")
+    if not platform:
+        catatan.append("Tidak ada agent yang ditemukan di profil ini. Pasang dan login dulu ke salah satunya, supaya hook-nya ikut terpasang.")
     if "antigravity" in platform and not ag_berhook:
-        print(f"  Catatan Antigravity: {ag_masalah}, jadi hook-nya tidak dipasang (perintah hook dipecah per spasi, dan berkas "
-              ".cmd dibaca dengan code page OEM). Aturannya tetap dipasang.")
+        catatan.append(f"Antigravity: {ag_masalah}, jadi hook-nya tidak dipasang (perintah hook dipecah per spasi, dan berkas "
+                       ".cmd dibaca dengan code page OEM). Aturannya tetap dipasang.")
+    for x in catatan:
+        print(f"  Catatan: {x}")
     w = Penulis(a.uji_kering)
 
     print("\n# Vault")
@@ -510,6 +674,7 @@ def main():
         else:
             alasan = "belum ada (jalankan hermes setup dulu)" if not hermes_cfg.exists() else "sudah punya bagian hooks sendiri"
             print(f"  [LEWAT] {hermes_cfg}: {alasan}. Potongan hook-nya ditulis ke Konfigurasi, gabungkan sendiri.")
+            catatan.append(f"Hermes: {hermes_cfg} {alasan}, jadi hook-nya digabung sendiri dari Konfigurasi\\hermes-hooks.yaml.")
             w.tulis(konf / "hermes-hooks.yaml", blok, timpa=True)
         w.tulis(WS / "9router" / "docker-compose.yml", (TEMPLAT / "9router" / "docker-compose.yml").read_text(encoding="utf-8"))
     if "zed" in platform:
@@ -540,9 +705,12 @@ def main():
     if "claude" in platform:
         terjemahan.append({"source": posix(WS / "AGENTS.md"), "section": "## Rule 13", "mirror": posix(home / ".claude" / "CLAUDE.md"),
                            "note": "cermin Indonesia Aturan 13 saja"})
+    opsi = {"vault": str(vault), "nama": nama, "github": a.github, "platform": a.platform, "tanpa_rag": a.tanpa_rag,
+            "lindungi": a.lindungi and [str(x) for x in lindungi], "repo_luar": a.repo_luar and str(repo_luar),
+            "hermes_home": a.hermes_home and str(hermes_home)}
     reg = {"about": "Registry aturan: satu sumber, banyak salinan, dipakai tools/sync_rules.py. Ditulis pasang.py. Path salinan di profil "
                     f"pengguna di sini diizinkan {nama} untuk ditulis agent, khusus untuk sinkronisasi aturan.",
-           "dipasang_oleh": "pasang.py", "vault": VP, "folder_kerja": FKP,
+           "dipasang_oleh": "pasang.py", "vault": VP, "folder_kerja": FKP, "opsi": {k: v for k, v in opsi.items() if v},
            "syncs": [{"name": "Protokol folder kerja", "source": posix(fk / "AGENTS.md"),
                       "copies": [{"path": posix(pth), "platform": pf} for pth, _, pf in salinan]}],
            "translations": terjemahan,
@@ -562,6 +730,12 @@ def main():
     tulis_json(w, reg_path, reg)
 
     if a.uji_kering:
+        print("\n# Ringkasan\n  " + ", ".join(f"{n} {s}" for s, n in sorted(w.hitung.items())) + f". RAG: {'dipasang' if rag else 'dilewati'}.")
+        for x in catatan:
+            print(f"  Catatan: {x}")
+        if w.diubah:
+            print("  Berkas yang sudah ada dan akan diubah, dicadangkan dulu ke .bak-<waktu> di sebelahnya:")
+            print("\n".join(f"    {x}" for x in w.diubah))
         print("\nUji kering: tidak ada yang ditulis, sinkronisasi, RAG, dan uji penjaga dilewati.")
         return 0
     masalah = []
@@ -579,13 +753,13 @@ def main():
             if not venv_py.exists() and jalan([py, "-m", "venv", WS / "tools" / "rag-venv"]):
                 raise RuntimeError("venv RAG gagal dibuat")
             if jalan([venv_py, "-m", "pip", "install", "--disable-pip-version-check", "-q", "-r", WS / "tools" / "requirements" / "rag-kit.txt"]):
-                raise RuntimeError("paket RAG gagal dipasang. Jalankan ulang pasang.py sesudah koneksi atau versi Python diperbaiki")
+                raise RuntimeError("paket RAG gagal dipasang, periksa koneksi atau versi Python")
             unduh_model(MODEL_DIR, a.model_dari)
             if jalan([venv_py, WS / "tools" / "rag_engine.py", "index", vault], env={**os.environ, "AGENT_VAULT": str(vault)}):
                 raise RuntimeError("indeks RAG gagal dibuat")
         except (OSError, ValueError, RuntimeError, http.client.HTTPException) as e:
             print(f"  [GAGAL] RAG: {e}")
-            masalah.append(f"RAG: {e}. Jalankan ulang pasang.py, langkah yang sudah selesai dilewati")
+            masalah.append(f"RAG: {e}. Jalankan ulang siapkan.cmd atau pasang.py, langkah yang sudah selesai dilewati")
 
     print("\n# Uji penjaga terpasang")
     konfig = (["--claude-settings", home / ".claude" / "settings.json"] if "claude" in platform else []) \
@@ -600,7 +774,14 @@ def main():
     print("\n# Selesai" + (" dengan masalah:" if masalah else ""))
     for m in masalah:
         print(f"  - {m}")
-    print("Langkah berikutnya ada di README.md, bagian Sesudah memasang. Sesi agent yang sedang berjalan perlu dibuka ulang.")
+    print("\n# Langkah berikutnya (rinciannya di README.md, bagian Sesudah memasang)")
+    print("  - Buka ulang semua sesi agent. Sesi yang sedang berjalan masih memakai aturan dan hook lama.")
+    print(f"  - Buka {vault} sebagai vault di Obsidian. Kalau baru, isi dulu Wiki\\system\\Profil Pengguna.md.")
+    if "hermes" in platform:
+        print("  - Hermes: " + ("" if hermes_berhook else f"gabungkan {konf / 'hermes-hooks.yaml'} ke config.yaml, lalu ")
+              + "jalankan sekali dengan --accept-hooks dan periksa dengan hermes hooks doctor.")
+    if "zed" in platform:
+        print(f"  - Zed: gabungkan {konf / 'zed-settings-contoh.json'} ke settings.json Zed.")
     return 1 if masalah else 0
 
 

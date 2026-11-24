@@ -2,7 +2,8 @@
 
 Kit ini memasang satu ekosistem agent coding di Windows: aturan bersama untuk beberapa agent, hook
 penjaga, vault memori Obsidian, pencarian RAG atas vault itu, dan enam skill. Semuanya dipasang dari
-templat oleh satu skrip, `pasang.py`, dengan nama dan folder milikmu sendiri.
+templat oleh satu skrip, `pasang.py`, dengan nama dan folder milikmu sendiri. Sesudah clone, cukup klik
+dua kali `siapkan.cmd`.
 
 Repo ini hanya memuat perkakas dan templatnya. Isi vault, transkrip percakapan, secret, dan pengaturan
 akun milik pemilik repo tidak ikut.
@@ -37,6 +38,7 @@ akun milik pemilik repo tidak ikut.
 - Windows 10 atau 11.
 - Python 3.10 atau lebih baru dari python.org. Pemasangan penuh diuji dengan 3.14, tes unitnya juga
   dengan 3.12. Hook memakai Python yang menjalankan `pasang.py`, jadi jangan dicopot sesudah memasang.
+  Python dari Microsoft Store tidak dipakai, karena path-nya berganti setiap kali diperbarui.
 - Git for Windows. Claude Code menjalankan hook lewat Git Bash.
 - Paling sedikit satu agent yang sudah terpasang dan sudah login dengan akunmu sendiri: Claude Code,
   Antigravity, Hermes Agent, atau Zed. `pasang.py` hanya memasang ke agent yang foldernya sudah ada.
@@ -55,17 +57,37 @@ akun milik pemilik repo tidak ikut.
    ```
 
 2. Tutup semua sesi agent yang sedang berjalan.
-3. Dari folder hasil clone, coba dulu dengan `--uji-kering`. Rencananya dicetak tanpa menulis apa pun.
+3. Klik dua kali `siapkan.cmd` di folder hasil clone. Yang ditanyakan: folder vault memori, nama
+   panggilan, akun GitHub (boleh kosong), dan mau memasang RAG atau tidak.
+4. Baca rencananya. Belum ada yang ditulis, dan di bagian akhirnya ada daftar berkasmu yang akan
+   diubah. Pemasangan baru mulai sesudah kamu menjawab `y`.
 
-   ```powershell
-   python pasang.py --vault "D:\Obsidian\Memori Agent" --nama Budi --github budi --uji-kering
-   ```
+Kalau Python atau Git belum ada, `siapkan.cmd` menawarkan memasangnya lewat winget, dan tidak memasang
+apa pun tanpa persetujuanmu. Folder kerja yang kurang cocok (folder profil, Downloads, Desktop, atau
+folder yang disinkronkan ke cloud) diberi peringatan sebelum apa pun ditulis.
 
-4. Kalau rencananya sudah benar, jalankan tanpa `--uji-kering`.
+### Memperbarui
 
-   ```powershell
-   python pasang.py --vault "D:\Obsidian\Memori Agent" --nama Budi --github budi
-   ```
+Jalankan `git pull` di folder hasil clone, lalu klik dua kali `siapkan.cmd` lagi. Opsi pemasangan
+terakhir dicatat di `Konfigurasi\rule_sync.json` dan ditawarkan lagi. Jadi cukup tekan Enter, baca
+rencananya, lalu setujui. Yang diperbarui hook, pengaturan agent, dan indeks RAG. Aturan, isi vault, dan
+skill yang sudah ada dibiarkan.
+
+### Tanpa siapkan.cmd
+
+Semua pertanyaan tadi bisa dijawab lewat opsi. Dari folder hasil clone, coba dulu dengan
+`--uji-kering`, lalu jalankan tanpa opsi itu.
+
+```powershell
+python pasang.py --vault "D:\Obsidian\Memori Agent" --nama Budi --github budi --uji-kering
+```
+
+```powershell
+python pasang.py --vault "D:\Obsidian\Memori Agent" --nama Budi --github budi
+```
+
+Opsi yang sama boleh ditulis di belakang `siapkan.cmd`, misalnya
+`siapkan.cmd --lindungi "D:\Dokumen Pribadi"`.
 
 | Opsi | Arti |
 |---|---|
@@ -73,21 +95,24 @@ akun milik pemilik repo tidak ikut.
 | `--nama` | Nama panggilanmu, dipakai di aturan |
 | `--github` | Akun GitHub-mu. Repo milik akun ini boleh di-clone ke folder kerja, repo orang lain diarahkan ke folder repo luar |
 | `--platform` | Agent yang dipasang, misalnya `claude,hermes`. Bawaannya keempatnya, dan yang belum terpasang dilewati |
-| `--lindungi` | Folder yang sama sekali tidak boleh dibuka agent. Boleh diulang. Bawaannya `~\.ssh` |
+| `--lindungi` | Folder lain yang sama sekali tidak boleh dibuka agent, selain `~\.ssh` yang selalu dilindungi. Boleh diulang |
 | `--repo-luar` | Folder untuk repo pihak ketiga. Bawaannya `Repo Luar` di sebelah folder kerja |
 | `--hermes-home` | Folder data Hermes, kalau bukan `HERMES_HOME` atau `~\.hermes` |
 | `--tanpa-rag` | Lewati venv, model, dan indeks RAG |
 | `--model-dari` | Folder berisi `model.onnx` dan `tokenizer.json` yang sudah diunduh, supaya tidak mengunduh lagi |
 | `--paksa` | Timpa berkas aturan yang sudah ada. Berkas lamanya dicadangkan dulu |
 
-Path tidak boleh memuat kutip ganda, `%`, `$`, atau backtick. Vault dan folder kerja harus terpisah,
-tidak saling memuat.
+Path tidak boleh memuat kutip ganda, `%`, `$`, backtick, atau `< > | ? *`. Vault dan folder kerja harus
+terpisah, tidak saling memuat.
+
+### Membaca keluarannya
 
 Setiap berkas di keluarannya diberi tanda:
 
 - `DITULIS`: baru atau diperbarui. Kalau berkasnya sudah ada, cadangannya `<nama>.bak-<waktu>` di sebelahnya.
 - `ADA`: sudah ada, dibiarkan.
 - `SAMA`: isinya sudah sama.
+- `DISALIN`: berkas skill yang disalin.
 - `LEWAT`: tidak bisa dipasang otomatis. Alasannya ikut dicetak.
 
 Di akhir, `pasang.py` menjalankan `sync_rules.py --check` dan `uji_penjaga.py`, lalu keluar dengan
@@ -205,6 +230,7 @@ di `tools\rag-venv`. Tiap skrip punya `--help`.
 
 | Berkas | Fungsi |
 |---|---|
+| `siapkan.cmd` | Pintu masuk untuk klik dua kali: mencari Python, lalu menjalankan `pasang.py --tanya` |
 | `pasang.py` | Pemasang kit ini |
 | `lokasi.py` | Lokasi vault dan folder kerja dibaca dari registry aturan, supaya tidak ada tool yang menanam path satu mesin |
 | `rag_engine.py` | Retrieval hibrida atas vault Markdown: BM25 dan embedding, index inkremental, judul bagian per chunk |

@@ -20,6 +20,7 @@ Semua perintah dijalankan dari folder workspace `{{WORKSPACE}}`. Daftar skill da
 | Tolak clone repo pihak ketiga ke folder kerja | `penjaga_repo.py` (hook) |
 | Uji hidup penjaga yang terpasang | `uji_penjaga.py` (perintah lengkap di bawah) |
 | Arsipkan transkrip sesi dengan sensor secret | `export_transcript.py` (hook Stop Claude Code, perintah agent lain di bawah) |
+| Wajibkan subagent menyebut model, ingatkan saat kembali ke sesi besar sesudah jeda lama | `penjaga_subagent.py` dan `penahan_jeda.py` (hook Claude Code) |
 | Cari proses alat yang masih hidup sesudah uji | `cek_proses_sisa.py --sejak 3h` (juga hook Stop Claude Code) |
 | Ingatkan agent mencatat log kalau berkas proyek berubah | `cek_jurnal.py` (hook Stop Claude Code) |
 | Pindahkan entri bulan lalu dari `log.md` dan `log_id.md` ke `Riwayat/` | `putar_log.py --vault "<vault>"` |
@@ -28,9 +29,10 @@ Semua perintah dijalankan dari folder workspace `{{WORKSPACE}}`. Daftar skill da
 | Oper tugas kode kecil ke agent lain di git worktree | `oper_kerja.py`, skill `oper-kerja` |
 | Uji setiap skill dan tool di peta kemampuan | `uji_peta.py` |
 | Cek repo workspace bersih dari secret dan data pribadi sebelum push | `cek_bersih.py` |
+| Perbarui kit sesudah `git pull` di workspace | klik dua kali `siapkan.cmd` |
 | Jalankan tes logika tools | `test_tools.py` lewat Python di `tools/rag-venv` |
 
-Alat yang ada di repo tapi tidak dipasang `pasang.py`: `laporan_harian.py` (tugas terjadwal Windows), `penahan_jeda.py` dan `penjaga_subagent.py` (hook Claude Code untuk hemat token), `uji_agen.py` (uji perilaku lintas agent), dan `ukur_token.py` (ukur token Claude Code). Pakai kalau dibutuhkan, dan catat di halaman ini.
+Alat yang ada di repo tapi tidak dipasang `pasang.py`: `laporan_harian.py` (tugas terjadwal Windows), `uji_agen.py` (uji perilaku lintas agent), dan `ukur_token.py` (ukur token Claude Code). Pakai kalau dibutuhkan, dan catat di halaman ini.
 
 ## Perintah lengkap
 

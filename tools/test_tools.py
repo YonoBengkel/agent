@@ -1611,5 +1611,104 @@ class Pasang(unittest.TestCase):  # logika pemasang kit agent (pasang.py, 2026-1
             self.assertEqual(self.p.kutip(p), f'"{p}"')   # tanpa kutip, Git Bash atau shlex Hermes salah memecahnya
         self.assertEqual(self.p.kutip("D:/Alat/Andrés/python.exe"), "D:/Alat/Andrés/python.exe")
 
+    def test_opsi_lama_dan_ke_argv(self):  # opsi pemasangan terakhir kembali utuh lewat registry dan argumen (siapkan.cmd, 2026-11-24)
+        o = {"vault": "D:\\Obsidian\\Memori Agent", "nama": "-Budi", "lindungi": ["D:\\A b", "D:\\C"], "tanpa_rag": True, "github": ""}
+        a = self.p.pengurai().parse_args(self.p.ke_argv(o))
+        self.assertEqual((a.vault, a.nama, a.lindungi, a.tanpa_rag, a.github), (o["vault"], "-Budi", o["lindungi"], True, None))
+        for k in self.p.OPSI_SIMPAN:
+            self.assertTrue(hasattr(a, k), k)
+        reg = {"dipasang_oleh": "pasang.py", "opsi": {**o, "paksa": True}}   # --paksa tidak pernah terbawa ke pemasangan berikutnya
+        self.assertEqual(self.p.opsi_lama(reg), {k: v for k, v in o.items() if v})
+        for lain in ({}, [], {"opsi": o}, {"dipasang_oleh": "pasang.py", "opsi": []}):
+            self.assertEqual(self.p.opsi_lama(lain), {})
+
+    def test_peringatan_folder_dan_vault(self):
+        import pathlib, tempfile
+        n = lambda s: len(self.p.peringatan_folder(pathlib.Path(s), pathlib.Path("C:/Users/budi")))
+        for path, jumlah in (("D:/Proyek", 0), ("C:/Users/budi/Documents/GitHub", 0), ("C:/Users/budi", 1), ("C:/Users", 1),
+                             ("C:/Users/budi/Downloads", 1), ("C:/Users/budi/OneDrive - Kampus/Desktop", 2)):
+            self.assertEqual(n(path), jumlah, path)
+        with tempfile.TemporaryDirectory() as d:
+            d = pathlib.Path(d).resolve()
+            fk = d / "Proyek"
+            (d / "berkas").write_text("x")
+            self.assertIsNone(self.p.salah_vault(d / "Vault", fk))
+            for salah in (fk, fk / "Vault", d, pathlib.Path(d.anchor), d / "a?b", d / "a%b", d / "berkas"):
+                self.assertIsNotNone(self.p.salah_vault(salah, fk), salah)
+            self.assertEqual(self.p.daftar_lindungi(d, None), [d / ".ssh"])
+            self.assertEqual(self.p.daftar_lindungi(d, [str(d / "Rahasia"), str(d / ".ssh")]), [d / ".ssh", d / "Rahasia"])
+            kosong = next((c for c in "ZYXWVUTS" if not os.path.exists(c + ":\\")), None)
+            if os.name == "nt" and kosong:
+                self.assertIn("Drive", self.p.salah_vault(pathlib.Path(kosong + ":/Vault"), fk))
+
+    def test_tanya(self):  # jawaban salah ditanya lagi, opsi lama dan opsi baris perintah tidak hilang
+        import contextlib, io, pathlib, tempfile
+        def tanya(cli, lama, fk, home, *jawab):
+            it = iter(jawab)
+            with contextlib.redirect_stdout(io.StringIO()):
+                hasil = self.p.tanya(cli, lama, fk, home, lambda teks: next(it))
+            self.assertEqual(list(it), [], "ada jawaban yang tidak ditanyakan")
+            return hasil
+        with tempfile.TemporaryDirectory() as d:
+            d = pathlib.Path(d).resolve()
+            home, fk, v, catatan = d / "Profil", d / "Proyek", d / "Vault", d / "Catatan Pribadi"
+            catatan.mkdir()
+            (catatan / "a.md").write_text("x")
+            baru = {"vault": str(v), "nama": "Budi", "github": "budi", "tanpa_rag": False}
+            # Path relatif, vault di folder kerja, nama kosong, dan URL GitHub ditolak. Kutip dari "Copy as path" dilepas. RAG bawaannya ya
+            self.assertEqual(tanya({}, {}, fk, home, "Vault", str(fk / "Vault"), f'"{v}"', "", "Budi", "https://github.com/budi", "budi", ""), baru)
+            # Folder berisi yang bukan vault kit harus disetujui dulu. Enter di pertanyaan vault memakai usulan di luar folder kerja
+            self.assertEqual(tanya({}, {}, fk, home, str(catatan), "", "", "Budi", "", "t"),
+                             {"vault": str(d / "Obsidian" / "Memori Agent"), "nama": "Budi", "github": "", "tanpa_rag": True})
+            self.assertEqual(tanya({}, {}, fk, home, str(catatan), "ya", "Budi", "", "")["vault"], str(catatan))
+            # Yang sudah ada di baris perintah tidak ditanyakan
+            self.assertEqual(tanya({"nama": "Ani", "github": "ani", "tanpa_rag": True, "paksa": True}, {}, fk, home, str(v)),
+                             {"vault": str(v), "nama": "Ani", "github": "ani", "tanpa_rag": True, "paksa": True})
+            lama = {"vault": str(v), "nama": "Budi", "github": "budi", "lindungi": ["D:\\Rahasia"]}
+            self.assertEqual(tanya({"tanpa_rag": True, "nama": "Ani"}, lama, fk, home, ""), {**lama, "tanpa_rag": True, "nama": "Ani"})
+            self.assertEqual(tanya({}, lama, fk, home, "entah", "t", "", "", "", ""), {**lama, "github": "", "tanpa_rag": False})
+            # Folder kerja yang berisiko: bawaannya berhenti, tapi pemasangan ulang di tempat yang sama tidak ditanya lagi
+            self.assertIsNone(tanya({}, {}, home, home, ""))
+            self.assertEqual(tanya({}, lama, home, home, "y"), lama)
+
+    @unittest.skipUnless(os.name == "nt", "siapkan.cmd hanya untuk Windows")
+    def test_siapkan_cmd(self):  # jalan dengan akhiran LF dan CRLF, meneruskan opsi dan kode keluar, tidak memasang apa pun tanpa Y
+        import pathlib, re, subprocess, tempfile
+        isi = (self.p.WS / "siapkan.cmd").read_bytes().replace(b"\r\n", b"\n")
+        perintah = b"\n".join(b for b in isi.split(b"\n") if not b.strip().lower().startswith(b"rem"))
+        self.assertTrue(isi.isascii())   # cmd membacanya dengan code page OEM
+        self.assertIsNone(re.search(rb"(?im)^\s*:|\bgoto\b|\bcall\s+:", perintah))
+        sistem = {k: v for k, v in os.environ.items() if k.upper() in ("SYSTEMROOT", "COMSPEC", "PATHEXT", "TEMP", "TMP")}
+        sistem["PATH"] = os.path.join(os.environ["SYSTEMROOT"], "System32")   # tanpa py, python, dan winget
+        for akhir in (b"\n", b"\r\n"):
+            with tempfile.TemporaryDirectory(prefix="siapkan (uji) & ") as d:
+                d = pathlib.Path(d)
+                (d / "siapkan.cmd").write_bytes(isi.replace(b"\n", akhir))
+                def jalan(*arg, masukan=b"", env=None):
+                    return subprocess.run([str(d / "siapkan.cmd"), *arg], input=masukan, capture_output=True, env=env, timeout=60)
+                r = jalan()
+                self.assertEqual(r.returncode, 1)
+                self.assertIn(b"folder hasil clone", r.stdout)
+                (d / "pasang.py").write_text("import sys\nprint(sys.argv[1:])\nsys.exit(3)\n")
+                r = jalan("--vault", "D:\\A b", "--tanpa-rag")
+                self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
+                self.assertIn(rb"['--tanya', '--vault', 'D:\\A b', '--tanpa-rag']", r.stdout)
+                r = jalan(env=sistem)
+                self.assertEqual(r.returncode, 1)
+                self.assertIn(b"https://www.python.org/downloads/", r.stdout)
+                self.assertNotIn(b"winget", r.stdout)
+                shim = d / "shim"
+                shim.mkdir()
+                (shim / "python.bat").write_text(f'@"{sys.executable}" %*\n')   # pyenv-win: tanpa call, siapkan.cmd berhenti di sini
+                r = jalan("--tanpa-rag", env={**sistem, "PATH": f"{sistem['PATH']};{shim}"})
+                self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
+                self.assertIn(b"['--tanya', '--tanpa-rag']", r.stdout)
+                self.assertFalse(r.stdout.rstrip().endswith(b"]"), "pause tidak tercapai, jadi jendelanya langsung tertutup")
+                (d / "winget.cmd").write_text('@echo off\necho %*> "%~dp0dipanggil.txt"\n')
+                for jawab, dipanggil in ((b"", False), (b"T\r\n", False), (b"Y\r\n", True)):
+                    r = jalan(masukan=jawab, env=sistem)
+                    self.assertEqual((r.returncode, (d / "dipanggil.txt").exists()), (1, dipanggil), r.stdout + r.stderr)
+                self.assertIn("install --id Python.Python.3.14", (d / "dipanggil.txt").read_text())
+
 if __name__ == "__main__":
     unittest.main()

@@ -10,6 +10,7 @@
 !/PETA_SKILLS_TOOLS.md
 !/PETA_PERAWATAN.md
 !/pasang.py
+!/siapkan.cmd
 !/.env.example
 # Templat kit: aturan, kerangka vault, dan skill yang lisensinya membolehkan disebarkan. Semuanya diperiksa
 # tools/cek_bersih.py sebelum terbit. Berkas yang dihasilkan pasang.py (aturan, Konfigurasi, skills, .env) tetap diabaikan.
