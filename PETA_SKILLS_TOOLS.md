@@ -32,7 +32,7 @@ Sebelum memilih arah desain, buka halaman vault `Wiki\system\Referensi Desain.md
 
 | Nama Skill | Kapan Digunakan (Trigger) | Path Berkas | Operator |
 |---|---|---|---|
-| `design-kit` | Membuat halaman web, landing page, dashboard, komponen HTML/CSS, audit anti-AI-slop, memilih design system | `design-kit/SKILL.md` | Universal (Claude, Antigravity, OpenCode) |
+| `design-kit` | Membuat halaman web, landing page, dashboard, komponen HTML/CSS, menentukan arah visual, audit anti-AI-slop, memilih design system | `design-kit/SKILL.md` | Universal (Claude, Antigravity, OpenCode) |
 | `logo-design` | Merancang logo, wordmark, monogram, brand mark SVG, favicon, evaluasi logo, mencari referensi 1.400+ SVG | `logo-design/SKILL.md` | Universal |
 | `break-ui` | Uji stres UI dengan data ekstrem (nama sangat panjang, nol item, angka raksasa, emoji, layout patah) | `break-ui/SKILL.md` | Universal |
 | `emil-design-eng` | Review estetika UI, hierarki visual, micro-interactions, craft bar tinggi ala Emil Kowalski | `emil-design-eng/SKILL.md` | Universal |
@@ -40,16 +40,14 @@ Sebelum memilih arah desain, buka halaman vault `Wiki\system\Referensi Desain.md
 | `design-taste-breakdown` | Membedah dan mengekstrak token desain (warna, tipografi, ritme) dari situs referensi | `design-taste-breakdown/SKILL.md` | Universal |
 | `animate` | Animasi dan motion (web, React Native, istilah, review, audit) serta video demo. Sub-peta | `animate/animate.md` | Universal |
 | `apple-design` | Menerapkan prinsip desain antarmuka dan motion fisik khas Apple ke web | `apple-design/SKILL.md` | Universal |
-| `ask-sonner` | Panduan integrasi, styling, dan pemecahan masalah toast library Sonner di React | `ask-sonner/SKILL.md` | Universal |
-| `pick-ui-library` | Memilih pustaka frontend yang tepat dari kurasi teruji (tabel, dnd, modal, chart) | `pick-ui-library/SKILL.md` | Universal |
+| `pick-ui-library` | Memilih pustaka frontend yang tepat dari kurasi teruji (tabel, dnd, modal, chart, toast). Sesudah memilih Sonner, baca `ask-sonner` | `pick-ui-library/SKILL.md` | Universal |
 | `prototype` | Membuat beberapa alternatif variasi UI untuk dipilih secara visual | `prototype/SKILL.md` | Universal |
 
 ### B. Perencanaan, Wawancara & Review
 
 | Nama Skill | Kapan Digunakan (Trigger) | Path Berkas | Operator |
 |---|---|---|---|
-| `grill-me` | Mematangkan rencana, arsitektur, atau keputusan teknis lewat wawancara tajam terstruktur | `grill-me/SKILL.md` | Universal |
-| `grilling` | Versi mendalam untuk menguji asumsi dan menemukan blind spot dalam rencana pengguna | `grilling/SKILL.md` | Universal |
+| `grilling` | Wawancara tajam berputaran (drill, grill, `/grill-me`) untuk mematangkan rencana, arsitektur, atau keputusan, dan menguji asumsinya | `grilling/SKILL.md` | Universal |
 | `oper-kerja` | Mengoper tugas kode kecil yang jelas dan bisa diuji ke agent gratis (OpenCode, Hermes), supaya agent utama cukup merencanakan dan memeriksa | `oper-kerja/SKILL.md` | Universal, perlu terminal |
 
 ### C. Dokumen, Data Science & Rekayasa
@@ -57,12 +55,9 @@ Sebelum memilih arah desain, buka halaman vault `Wiki\system\Referensi Desain.md
 | Nama Skill | Kapan Digunakan (Trigger) | Path Berkas | Operator |
 |---|---|---|---|
 | `markdown-to-docx` | Mengonversi teks atau berkas Markdown ke dokumen Word (.docx) dengan styling rapi | `markdown-to-docx/SKILL.md` | Universal |
-| `ml-best-practices` | Tugas machine learning, regresi, klasifikasi, clustering, evaluasi model data | `ml-best-practices/SKILL.md` | Universal |
-| `notebook-guidance` | Menulis dan merapikan Jupyter Notebook (.ipynb) untuk analisis data | `notebook-guidance/SKILL.md` | Universal |
+| `data-notebook` | Notebook Jupyter, Kaggle, atau Colab, EDA, machine learning, validasi tanpa kebocoran, submisi kompetisi, dan grafik Python | `data-notebook/SKILL.md` | Universal |
 | `schema-mapping` | Pemetaan skema antar basis data, transformasi data, ETL dan ELT | `schema-mapping/SKILL.md` | Universal |
-| `data-autocleaning` | Pipeline pembersihan data otomatis, imputasi, penanganan outlier | `data-autocleaning/SKILL.md` | Universal |
 | `managing-python-dependencies` | Tata kelola virtualenv dan dependensi Python tanpa merusak lingkungan sistem | `managing-python-dependencies/SKILL.md` | Universal |
-| `write-swift` | Menulis dan meninjau kode modern Swift 6 (konkurensi, value types, actor) | `write-swift/SKILL.md` | Universal |
 
 ### D. Memori & Produktivitas
 
@@ -108,3 +103,19 @@ Path relatif terhadap folder workspace ini. `<vault>` dan `<folder kerja>` adala
 | `test_tools.py` | Pengujian unit untuk logika tools internal | `tools\rag-venv\Scripts\python.exe tools\test_tools.py` |
 | `playwright-venv` | Python dengan Playwright 1.64.1 untuk skill `webapp-testing` dan `webapp-audit`. Browsernya Edge terpasang, jadi jangan jalankan `playwright install` | `tools\playwright-venv\Scripts\python.exe <skrip.py>` |
 | `axe-core` | Mesin uji aksesibilitas (WCAG) yang disuntikkan ke halaman yang sedang jalan | `tools\axe-core\axe.min.js`, dimuat otomatis oleh `skills\webapp-audit\scripts\sweep_routes.py` |
+
+---
+
+## 3. Padanan
+
+Skill yang hanya ada di Claude, dan penggantinya untuk agent lain. Penggantinya dicatat dari nama skill atau alatnya, belum diuji (unverified).
+
+| Kebutuhan | Claude | Agent lain |
+|---|---|---|
+| Browser | `built-in-browser`, `chrome-browser` | `web-browser`, `webapp-testing` |
+| Grafik | `dataviz` | `data-notebook` bagian 6 |
+| PDF | `pdf` | `markitdown`, `pdf_parser.py`. Hermes: `pdf` |
+| Word | `docx`, `docs`, `markdown-to-docx` | `markdown-to-docx`. Hermes: `docx` |
+| Slide | `pptx` | Belum ada. Hermes: `powerpoint` |
+| Spreadsheet | `xlsx` | Python. Hermes: `xlsx` |
+| Riset | `deep-research` | Belum ada. Hermes: `grounded-citations` |
