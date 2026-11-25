@@ -39,6 +39,7 @@ Sebelum memilih arah desain, buka halaman vault `Wiki\system\Referensi Desain.md
 | `mobile-native` | Mengoptimasi web app agar terasa seperti aplikasi native di HP (tap delay, notch, 100vh bug, scroll) | `mobile-native/SKILL.md` | Universal |
 | `design-taste-breakdown` | Membedah dan mengekstrak token desain (warna, tipografi, ritme) dari situs referensi | `design-taste-breakdown/SKILL.md` | Universal |
 | `animate` | Animasi dan motion (web, React Native, istilah, review, audit) serta video demo. Sub-peta | `animate/animate.md` | Universal |
+| `print-and-slides` | Bahan cetak (banner, poster, brosur, leaflet) dan slide (PPT, deck, naskah, aset Canva) | `print-and-slides/SKILL.md` | Universal |
 | `apple-design` | Menerapkan prinsip desain antarmuka dan motion fisik khas Apple ke web | `apple-design/SKILL.md` | Universal |
 | `pick-ui-library` | Memilih pustaka frontend yang tepat dari kurasi teruji (tabel, dnd, modal, chart, toast). Sesudah memilih Sonner, baca `ask-sonner` | `pick-ui-library/SKILL.md` | Universal |
 | `prototype` | Membuat beberapa alternatif variasi UI untuk dipilih secara visual | `prototype/SKILL.md` | Universal |
@@ -116,6 +117,6 @@ Skill yang hanya ada di Claude, dan penggantinya untuk agent lain. Penggantinya 
 | Grafik | `dataviz` | `data-notebook` bagian 6 |
 | PDF | `pdf` | `markitdown`, `pdf_parser.py`. Hermes: `pdf` |
 | Word | `docx`, `docs`, `markdown-to-docx` | `markdown-to-docx`. Hermes: `docx` |
-| Slide | `pptx` | Belum ada. Hermes: `powerpoint` |
+| Slide | `pptx` | `print-and-slides`. Hermes: `powerpoint` |
 | Spreadsheet | `xlsx` | Python. Hermes: `xlsx` |
 | Riset | `deep-research` | Belum ada. Hermes: `grounded-citations` |
