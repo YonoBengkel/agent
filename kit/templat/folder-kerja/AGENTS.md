@@ -42,7 +42,7 @@ All shared skills and tools live centrally in `{{WORKSPACE}}\` and apply to ever
 
 - Capability map: `{{WORKSPACE}}\PETA_SKILLS_TOOLS.md` (the index of all skills and CLI tools).
 - Skill library: `{{WORKSPACE}}\skills\<skill_name>\SKILL.md`. A skill whose folder is missing is not installed on this machine.
-- When {{NAMA}} asks to use "skills/tools yang necessary" or when a task matches the capability map (e.g. design, linting, stress-testing, data cleaning, schema mapping, reviewing plans), read the map first, load the required `SKILL.md` on demand, and execute it without bloating the global prompt.
+- Before your first reply to a task, check it against these triggers: "drill", "grill", or reviewing a plan, testing or auditing a web app, handing off code to another agent, converting PDF or Office files to Markdown, vault notes, or the job of another skill in `{{WORKSPACE}}\skills\`. On a match, open `{{WORKSPACE}}\PETA_SKILLS_TOOLS.md` first, then the `SKILL.md` it names, even when the task looks easy. A one-value edit or a plain question needs no map.
 
 ## At session start
 

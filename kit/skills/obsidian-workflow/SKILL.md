@@ -28,8 +28,8 @@ terarah; jangan membaca seluruh vault.
 2. Tulis dengan format Aturan 3 (kalimat tujuan, heading, ≥2 backlink, UTF-8 tanpa BOM).
 3. Halaman wiki baru → tambahkan ke `index.md` dan catat di `Wiki\log.md` lalu `log_id.md`.
 
-**Memperbarui `KONTEKS_PROYEK.md`:** tambahkan entri di "Log Perubahan" untuk perubahan
-besar. Jika ada klaim lama yang terbukti salah, **koreksi di tempat** (Aturan 10).
+**Memperbarui `KONTEKS_PROYEK.md`:** tulis ulang statusnya di tempat. Catatan perubahan
+besar ditambahkan di "Log Perubahan" `Riwayat\KONTEKS <YYYY-MM>.md` bulan ini. Jika ada klaim lama yang terbukti salah, **koreksi di tempat** (Aturan 10).
 
 Format entri log perubahan:
 ```markdown

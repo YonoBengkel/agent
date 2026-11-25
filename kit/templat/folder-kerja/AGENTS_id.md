@@ -44,7 +44,7 @@ Semua skill dan tool bersama tersimpan terpusat di `{{WORKSPACE}}\` dan berlaku 
 
 - Peta kemampuan: `{{WORKSPACE}}\PETA_SKILLS_TOOLS.md` (indeks semua skill dan perkakas CLI).
 - Lumbung skill: `{{WORKSPACE}}\skills\<nama_skill>\SKILL.md`. Skill yang foldernya tidak ada belum terpasang di mesin ini.
-- Saat {{NAMA}} meminta untuk menggunakan "skills/tools yang necessary" atau saat sebuah tugas cocok dengan peta kemampuan (seperti desain, audit linter, uji stres, pembersihan data, pemetaan skema, review rencana), baca petanya terlebih dahulu, muat `SKILL.md` yang bersangkutan secara on-demand, dan jalankan tanpa membebani prompt global.
+- Sebelum balasan pertama untuk sebuah tugas, cocokkan tugas itu dengan pemicu ini: "drill", "grill", atau meninjau rencana, menguji atau mengaudit aplikasi web, mengoper kode ke agent lain, mengubah PDF atau berkas Office menjadi Markdown, catatan vault, atau tugas skill lain di `{{WORKSPACE}}\skills\`. Kalau cocok, buka `{{WORKSPACE}}\PETA_SKILLS_TOOLS.md` lebih dulu, lalu `SKILL.md` yang disebutnya, walau tugasnya kelihatan mudah. Mengubah satu nilai atau pertanyaan biasa tidak butuh peta.
 
 ## Di awal sesi
 
