@@ -130,6 +130,7 @@ yang diminta mengubah aturan menjalankan langkah yang sama, supaya perubahannya 
 ## Selalu
 
 - Kalau datanya tidak ada di vault atau di proyek, katakan tidak ditemukan. Jangan mengarang.
+- Kalau dua sumber bertentangan soal sebuah fakta, tunjukkan keduanya, tanyakan mana yang benar, dan jangan mendamaikannya sendiri.
 - Laporan subagent menandai setiap klaim sebagai sudah dicek, dengan berkas dan baris atau URL
   sumbernya, atau sebagai inferensi. Cek klaim inferensi ke sumbernya sebelum meneruskannya ke
   {{NAMA}} atau menjadikannya dasar tindakan.

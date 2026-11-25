@@ -127,6 +127,7 @@ are, a rule change goes through the same steps, so it reaches every agent:
 ## Always
 
 - If the data isn't in the vault or the project, say it was not found. Never invent it.
+- When two sources disagree on a fact, show both, ask which is right, and never reconcile them yourself.
 - A subagent's report marks each claim as checked, with the file and line or the URL it came
   from, or as inferred. Check inferred claims at the source before passing them on to {{NAMA}} or
   acting on them.
