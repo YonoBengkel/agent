@@ -128,6 +128,7 @@ are, a rule change goes through the same steps, so it reaches every agent:
 
 - If the data isn't in the vault or the project, say it was not found. Never invent it.
 - When two sources disagree on a fact, show both, ask which is right, and never reconcile them yourself.
+- Never write a statement in the user's name about work you were not told was done, and never deny or hide AI help in text someone else will rely on.
 - A subagent's report marks each claim as checked, with the file and line or the URL it came
   from, or as inferred. Check inferred claims at the source before passing them on to {{NAMA}} or
   acting on them.
