@@ -264,10 +264,12 @@ def payload(platform, alat, masukan, fx, sudah_baca=False):
             "transcript_path": fx.baca_claude if sudah_baca else fx.kosong, "tool_name": alat, "tool_input": masukan}
 
 
-def kasus(platform, vault, root, kerja, lindung):
+def kasus(platform, vault, root, kerja, lindung, rumah=()):
     """(penjaga, alat, masukan uji, masukan wajib lolos, kembaran lolos memakai riwayat sudah-baca, keputusan yang diharapkan
     untuk masukan uji). Nama berkas acak supaya belum ada; penjaga_desain hanya menolak berkas tampilan baru. Masukan untuk
-    vault pribadi (lindung) hanya menyebut berkas yang tidak ada, dan tidak pernah dijalankan."""
+    vault pribadi (lindung) hanya menyebut berkas yang tidak ada, dan tidak pernah dijalankan. Folder --protect yang langsung
+    di bawah home (rumah, misalnya .claude) diuji lewat rujukan ~, bentuk yang dipakai Antigravity saat menyisir ~/.claude
+    (2026-11-26)."""
     nama = f"uji-penjaga-{uuid.uuid4().hex[:8]}"
     catatan, html, tujuan = f"{vault}/{nama}.md", f"{root}/uji-probe-desain/{nama}.html", f"{root}/uji-probe-repo"
     pribadi = f"{lindung}/{nama}.md"
@@ -289,12 +291,15 @@ def kasus(platform, vault, root, kerja, lindung):
                 ("penjaga_repo", "write_file", {"path": f"{tujuan}/.claude/settings.json", "content": "{}"},
                  {"path": f"{tujuan}/{nama}.md", "content": BIASA}, False, "ditanya"),
                 ("penjaga_repo", "terminal", {"command": "npm install left-pad"}, {"command": "npm ci"}, False, "ditanya"),
-                ("penjaga_desain", "write_file", {"path": html, "content": HTML}, {"path": html, "content": HTML}, True, "ditolak")]
+                ("penjaga_desain", "write_file", {"path": html, "content": HTML}, {"path": html, "content": HTML}, True, "ditolak")] + [
+                ("vault_guard", "terminal", {"command": f"ls ~/{r}/{nama}.md"}, {"command": f"ls ~/{nama}"}, False, "ditolak") for r in rumah]
     return [("vault_guard", "write_to_file", {"TargetFile": catatan, "CodeContent": NIK}, {"TargetFile": catatan, "CodeContent": BIASA}, False, "ditolak"),
             ("vault_guard", "view_file", {"AbsolutePath": pribadi}, {"AbsolutePath": f"{root}/{nama}.md"}, False, "ditolak"),
             ("vault_guard", "run_command", {"CommandLine": f'type "{pribadi}"', "Cwd": kerja}, {"CommandLine": f'echo x > "{catatan}"', "Cwd": kerja}, False, "ditolak"),
             ("penjaga_repo", "run_command", {"CommandLine": clone, "Cwd": kerja}, {"CommandLine": "npm install left-pad", "Cwd": kerja}, False, "ditolak"),
-            ("penjaga_desain", "write_file", {"Path": html}, {"Path": html}, True, "ditolak")]
+            ("penjaga_desain", "write_file", {"Path": html}, {"Path": html}, True, "ditolak")] + [
+            ("vault_guard", "run_command", {"CommandLine": f"Test-Path ~/{r}/{nama}.md", "Cwd": kerja},
+             {"CommandLine": f"Test-Path ~/{nama}/x.md", "Cwd": kerja}, False, "ditolak") for r in rumah]
 
 
 def uji_satu(platform, h, data, fx, folder):
@@ -308,8 +313,10 @@ def uji_platform(platform, entri, fx, vault, root, folder, lindung):
     """Baris (platform, penjaga, alat, hasil masukan uji, hasil wajib lolos, status, catatan) per penjaga dan alat yang diuji."""
     dari_hook = [p.replace("\\", "/") for h in entri if "vault_guard" in teks_perintah(h, folder)
                  for p in re.findall(r'--protect\s+"([^"]+)"', teks_perintah(h, folder))]
+    rumah = [os.path.basename(p.rstrip("/")) for p in dari_hook
+             if os.path.normcase(os.path.dirname(os.path.abspath(p))) == os.path.normcase(os.path.expanduser("~"))]
     # Tanpa --protect di hook mana pun, kasus vault pribadi memakai folder yang tidak dijaga, jadi hasilnya GAGAL
-    baris, semua = [], kasus(platform, vault, root, fx.kerja, lindung or (dari_hook[0] if dari_hook else f"{root}/vault-pribadi-tidak-dijaga"))
+    baris, semua = [], kasus(platform, vault, root, fx.kerja, lindung or (dari_hook[0] if dari_hook else f"{root}/vault-pribadi-tidak-dijaga"), rumah)
     for penjaga in PENJAGA:
         terpasang = [h for h in entri if penjaga in teks_perintah(h, folder)]
         daftar = [k for k in semua if k[0] == penjaga]

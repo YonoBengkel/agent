@@ -7,9 +7,10 @@
    ke vault, apa pun isinya, termasuk perintah git yang mengubah isi folder kerjanya. Kode execute_code ditolak kalau menyebut
    path vault. Claude (Bash/PowerShell) dan run_command Antigravity tidak memakai pagar ini (keputusan pengguna 2026-11-14): di
    shell mereka yang dijaga hanya vault pribadi (tugas 3).
-3. Folder --protect (vault pribadi, sejak 2026-11-06): tolak setiap tool yang masuk ke hook kalau membaca, menulis, atau
-   mencakup folder itu, termasuk lewat folder induknya. Di Claude hanya untuk shell, karena aturan deny Read dan Edit tidak
-   menjangkau perintah shell.
+3. Folder --protect (vault pribadi, sejak 2026-11-06, dan ~/.claude untuk agent selain Claude, sejak 2026-11-26): tolak
+   setiap tool yang masuk ke hook kalau membaca, menulis, atau mencakup folder itu, termasuk lewat folder induknya dan lewat
+   rujukan home seperti ~/.claude, $env:USERPROFILE, atau Path.home(). Di Claude hanya untuk shell, karena aturan deny Read
+   dan Edit tidak menjangkau perintah shell.
 4. Opsi --worker untuk pekerja oper_kerja.py (sejak 2026-11-07): hanya alat berkas, dan baca maupun tulis dikunci ke folder
    sesinya. Berkas pagar-aktif di folder tugas membuktikan ke oper_kerja.py bahwa hook ini benar-benar berjalan.
 Input JSON hook di stdin. Claude dan Hermes: keluar 2 dengan alasan di stderr berarti diblokir, 0 berarti lanjut.
@@ -77,6 +78,13 @@ WRITE_WORD = re.compile(r"(?i)(?<![\w.-])(?:" + "|".join(sorted(WRITE_VERBS)) + 
 NULL_SINKS = {"/dev/null", "/dev/stdout", "/dev/stderr", "nul", "$null"}
 UNRESOLVED = re.compile(r"[$%`]|\{\}")  # target yang baru diketahui saat jalan
 PATH_END = r"(?=$|[\s;|&),\]}+])"  # akhir path sesudah kutipnya dilepas
+# Rujukan home, diganti path home utuh sebelum folder --protect dicocokkan (2026-11-26: Antigravity menyisir ~/.claude lewat
+# os.path.expanduser). Bentuknya sesudah huruf kecil, garis miring terbalik menjadi /, dan kutip dilepas: ~ dan ~/x (bukan
+# HEAD~1 atau ~5), $HOME, $env:USERPROFILE, %USERPROFILE%, Path.home(), os.homedir(), dan os.environ["HOME"]
+HOME_REF = re.compile(r"(?<![\w.~-])~(?=/|$|[\s;|&),\]}+])|\$\{?(?:env:)?(?:home|userprofile)\}?(?!\w)|%userprofile%|%homedrive%%homepath%"
+                      r"|(?:pathlib\.)?path\.home\(\)|(?:os\.)?homedir\(\)|(?:process\.)?env\.(?:home|userprofile)(?!\w)"
+                      r"|(?:os\.)?(?:environ\[|environ\.get\(|getenv\(|(?:\[environment\]::)?get(?:folderpath|environmentvariable)\()"
+                      r"\s*(?:home|userprofile)\s*[\],)]")
 WINDOWS_SWITCH = re.compile(r"/[a-zA-Z]")  # dir /b dan cmd /c, bukan /d milik Git Bash
 HEREDOC = re.compile(r"""(?<!<)<<-?[ \t]*(['"]?)([A-Za-z_][\w.-]*)\1(?![\w.-])""")  # <<EOF dan <<-'EOF', bukan <<< atau 1 << 2
 # Perintah yang menjalankan isi heredoc atau memakainya sebagai argumen, jadi isinya tetap dinilai per kata (2026-11-20)
@@ -348,11 +356,14 @@ def leaves(value):
 def opens(text, folder):
     """Teks menyebut folder atau isinya (D:/x, D:\\x, x%20y, /d/x, /mnt/d/x), atau menyebut induknya sebagai path utuh,
     karena membaca induk ikut membaca folder itu. D:/x/y yang y-nya bukan folder itu tidak kena. Kutip dilepas dua cara:
-    "D:/"x menyatu, sedangkan r"D:/x" dan "D:/x"/y dipisah spasi supaya awalan dan akhir path tetap terbaca."""
+    "D:/"x menyatu, sedangkan r"D:/x" dan "D:/x"/y dipisah spasi supaya awalan dan akhir path tetap terbaca. Rujukan home
+    (HOME_REF) dibaca sebagai path home utuh, jadi ~ saja mencakup semua folder di bawah home."""
     # \" adalah kutip yang di-escape, bukan garis miring, jadi D:/ sebelum \" tetap terbaca akar drive (2026-11-22)
     raw = unquote(re.sub(r"\\+", "/", text.replace("\\ ", " ").replace('\\"', '"'))).lower()
     variants = (re.sub(r"""["']""", "", raw), re.sub(r"""["']""", " ", raw))
-    path = os.path.abspath(folder).replace("\\", "/").lower().rstrip("/")
+    home = os.path.expanduser("~").replace("\\", "/").lower().rstrip("/")
+    variants = tuple(HOME_REF.sub(lambda m: " " + home, v) for v in variants)   # spasi: x.Path.home() tetap terbaca awal path
+    path = asal = os.path.abspath(folder).replace("\\", "/").lower().rstrip("/")
     def forms(p):  # akar drive tidak punya bentuk /d, karena bentrok dengan switch Windows
         if len(p) == 2:   # d: polos sesudah kata kunci Python, kurung, atau koma adalah kode (for x in d:, x[d:], {d: 1},
             # def f(d: int)), bukan akar drive (salah tolak 2026-11-21). d:/ tetap dinilai tanpa pengecualian itu.
@@ -368,7 +379,12 @@ def opens(text, folder):
         path = os.path.dirname(path).rstrip("/")
         if any(found(f + r"(?:/?" + PATH_END + r"|/[*?\[])") for f in forms(path)):
             return True
-    return False
+    # Folder langsung di bawah home yang path-nya dirakit saat jalan, misalnya Path.home().joinpath(".claude"): home disebut, dan
+    # nama folder itu berdiri sendiri, bukan bagian path lain seperti D:/x/.claude milik proyek. Path.home().rglob("*") dan
+    # kawannya menyisir seluruh home
+    nama = r"(?:^|[\s(\[,+=])/?" + re.escape(asal.rsplit("/", 1)[-1]) + r"(?=$|[\s/)\],;|&}+])"
+    sisir = re.escape(home) + r"\.(?:r?glob|iterdir|walk)\("
+    return os.path.dirname(asal) == home and any(home in v and (re.search(nama, v) or re.search(sisir, v)) for v in variants)
 
 # Pengurai PowerShell sendiri: offset token Divide. Perintah dibaca dari stdin sebagai UTF-8, jadi kode halaman konsol tidak ikut
 BAGI_PS = ("$m = New-Object IO.MemoryStream; [Console]::OpenStandardInput().CopyTo($m); $t = $e = $null; "
@@ -525,9 +541,11 @@ def main():
                 return keluar(fmt, "deny", f"Ditolak penjaga vault: {refused}. Kerjakan di dalam folder kerja saja.")
         closed = opened(hook, a.protect)
         if closed:
-            catat("deny", "vault pribadi", closed[0])
-            return keluar(fmt, "deny", f"Ditolak penjaga vault: panggilan {tool} ini membuka atau mencakup {closed[0]}, vault pribadi "
-                          "yang tidak boleh dibaca atau ditulis agent. Kalau mencari di folder induknya, sebut subfolder yang dituju. "
+            jenis = "vault pribadi" if inside(closed[0], os.path.dirname(a.vault)) else "folder terlindung"
+            catat("deny", jenis, closed[0])
+            return keluar(fmt, "deny", f"Ditolak penjaga vault: panggilan {tool} ini membuka atau mencakup {closed[0]}, {jenis} "
+                          "yang tidak boleh dibaca atau ditulis agent. Kalau mencari di folder induknya atau di home, sebut path "
+                          "absolut subfolder yang dituju. "
                           "Jangan mencari jalan lain. Kalau isinya memang dibutuhkan, minta ke pengguna.")
         if tool in SHELL_TOOLS:
             found = shell_touches(hook, [a.vault, *a.protect])
