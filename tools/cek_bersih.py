@@ -118,7 +118,7 @@ def gitleaks(exe, akar, berkas, izin, terpakai):
     """Temuan gitleaks atas salinan berkas yang bisa terbit (mode dir) dan atas seluruh riwayat git (mode git)."""
     hasil = []
     # Salinan sementara di drive repo, di folder yang diabaikan git, bukan di %TEMP% profil pengguna
-    tmp = tempfile.mkdtemp(prefix=".cek_bersih-", dir=os.path.join(akar, "tools"))
+    tmp = tempfile.mkdtemp(prefix=".cek_bersih-", dir=os.path.join(akar if os.path.isdir(os.path.join(akar, "tools")) else AKAR, "tools"))
     try:
         salinan = os.path.join(tmp, "berkas")
         for rel in berkas:
